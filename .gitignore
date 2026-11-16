@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 仮想環境（uv sync で作り直せるので共有しない）
+.venv/
+
+# 開発用のデータベース（自分のデータが入るので共有しない）
+db.sqlite3
+
+# 環境変数・秘密の設定
+.env
+
+# エディタ・OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# collectstatic の出力
+staticfiles/
