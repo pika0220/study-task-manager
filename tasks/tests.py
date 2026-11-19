@@ -1,7 +1,10 @@
+from datetime import datetime, timedelta
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import Task
 
@@ -22,6 +25,45 @@ class HomeViewTests(TestCase):
         response = self.client.get(reverse("home"))
         # 画面に渡す数が「自分の未完了だけ」の1件になっている
         self.assertEqual(response.context["open_count"], 1)
+
+    def test_home_lists_my_top_level_tasks(self):
+        User = get_user_model()
+        me = User.objects.create_user("student", password="test-pass-123")
+        other = User.objects.create_user("other", password="test-pass-123")
+        exam = Task.objects.create(owner=me, title="国家試験", importance=Task.Importance.HIGH)
+        Task.objects.create(owner=me, title="薬理学の問題集", parent=exam)
+        Task.objects.create(owner=me, title="レポート提出", is_done=True)
+        Task.objects.create(owner=other, title="他の人のタスク")
+        self.client.force_login(me)
+        response = self.client.get(reverse("home"))
+
+        self.assertEqual([t.title for t in response.context["open_tasks"]], ["国家試験"])
+        self.assertEqual([t.title for t in response.context["done_tasks"]], ["レポート提出"])
+        self.assertContains(response, "重要度 高")
+        self.assertContains(response, "子タスク 1件・0%")
+        # 子タスクは別のカードにせず、ほかの人のタスクは出さない
+        self.assertNotContains(response, "薬理学の問題集")
+        self.assertNotContains(response, "他の人のタスク")
+
+    def test_home_orders_by_importance_then_due(self):
+        me = get_user_model().objects.create_user("student", password="test-pass-123")
+        now = timezone.now()
+        Task.objects.create(owner=me, title="低・明日", importance=Task.Importance.LOW, due_at=now + timedelta(days=1))
+        Task.objects.create(owner=me, title="高・来週", importance=Task.Importance.HIGH, due_at=now + timedelta(days=7))
+        Task.objects.create(owner=me, title="高・明日", importance=Task.Importance.HIGH, due_at=now + timedelta(days=1))
+        Task.objects.create(owner=me, title="高・締切なし", importance=Task.Importance.HIGH)
+        self.client.force_login(me)
+        response = self.client.get(reverse("home"))
+        self.assertEqual(
+            [t.title for t in response.context["open_tasks"]],
+            ["高・明日", "高・来週", "高・締切なし", "低・明日"],
+        )
+
+    def test_home_shows_message_when_empty(self):
+        me = get_user_model().objects.create_user("student", password="test-pass-123")
+        self.client.force_login(me)
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, "未完了のタスクはありません")
 
 
 class TaskModelTests(TestCase):
@@ -96,3 +138,20 @@ class TaskModelTests(TestCase):
             owner=self.user, title="済", importance=Task.Importance.HIGH, is_done=True
         )
         self.assertEqual(list(Task.objects.all()), [high, low, done])
+
+    def test_due_status(self):
+        # 基準の時刻を決めて、締切との差で状態が変わることを確かめる
+        now = timezone.make_aware(datetime(2026, 11, 20, 12, 0))
+        task = self.make("課題")
+        self.assertIsNone(task.due_status(now))
+        task.due_at = now - timedelta(hours=1)
+        self.assertEqual(task.due_status(now), "overdue")
+        task.is_done = True  # 完了していれば期限切れにはしない
+        self.assertEqual(task.due_status(now), "today")
+        task.is_done = False
+        task.due_at = now + timedelta(hours=6)
+        self.assertEqual(task.due_status(now), "today")
+        task.due_at = now + timedelta(days=2)
+        self.assertEqual(task.due_status(now), "soon")
+        task.due_at = now + timedelta(days=10)
+        self.assertEqual(task.due_status(now), "later")

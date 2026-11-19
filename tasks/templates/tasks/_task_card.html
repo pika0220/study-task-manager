@@ -1,0 +1,43 @@
+{% comment %}
+  タスク1件のカード。使い方：{% include "tasks/_task_card.html" with task=task %}
+  重要度は「色」と「文字（高・中・低）」の両方で見せる（色だけだと見分けにくい人もいるため）。
+  importance の数字：3＝高、2＝中、1＝低
+{% endcomment %}
+<article class="card border-l-8 bg-base-100 shadow-sm
+  {% if task.importance == 3 %}border-error{% elif task.importance == 2 %}border-warning{% else %}border-base-300{% endif %}
+  {% if task.is_done %}opacity-60{% endif %}">
+  <div class="card-body gap-2 p-4">
+    <div class="flex items-start justify-between gap-2">
+      <h2 class="text-base font-bold {% if task.is_done %}line-through{% endif %}">{{ task.title }}</h2>
+      <span class="badge badge-sm shrink-0
+        {% if task.importance == 3 %}badge-error{% elif task.importance == 2 %}badge-warning{% else %}badge-ghost{% endif %}">
+        重要度 {{ task.get_importance_display }}
+      </span>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      <span class="badge badge-outline badge-sm">{{ task.get_category_display }}</span>
+      {% if task.due_at %}
+        {% with status=task.due_status %}
+          {% if status == "overdue" %}
+            <span class="badge badge-error badge-sm">期限切れ</span>
+          {% elif status == "today" %}
+            <span class="badge badge-warning badge-sm">今日</span>
+          {% endif %}
+          <span>締切 {{ task.due_at|date:"n/j（D）H:i" }}</span>
+        {% endwith %}
+      {% else %}
+        <span class="text-base-content/50">締切なし</span>
+      {% endif %}
+    </div>
+
+    {% with total=task.children.all|length %}
+      {% if total %}
+        <div class="flex items-center gap-2 text-xs">
+          <progress class="progress progress-primary w-full" value="{{ task.progress }}" max="100"></progress>
+          <span class="shrink-0">子タスク {{ total }}件・{{ task.progress }}%</span>
+        </div>
+      {% endif %}
+    {% endwith %}
+  </div>
+</article>

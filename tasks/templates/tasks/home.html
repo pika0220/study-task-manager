@@ -3,14 +3,34 @@
 {% block title %}ホーム{% endblock %}
 
 {% block content %}
-  <h1 class="mb-4 text-xl font-bold">ようこそ，{{ user.username }} さん</h1>
-
-  <!-- 数字をひと目で見せるカード（daisyUI の stat） -->
-  <div class="stats w-full bg-base-100 shadow-sm">
-    <div class="stat">
-      <div class="stat-title">未完了のタスク</div>
-      <div class="stat-value text-primary">{{ open_count }}<span class="ml-1 text-base font-normal">件</span></div>
-      <div class="stat-desc whitespace-normal">締切と重要度の順に，次のIssueで一覧を出します</div>
-    </div>
+  <div class="mb-4 flex items-end justify-between gap-2">
+    <h1 class="text-xl font-bold">やること</h1>
+    <span class="text-sm text-base-content/70">未完了 <span class="text-lg font-bold text-primary">{{ open_count }}</span> 件</span>
   </div>
+
+  <!-- 未完了のタスク：重要度が高い順、締切が近い順 -->
+  <div class="flex flex-col gap-3">
+    {% for task in open_tasks %}
+      {% include "tasks/_task_card.html" with task=task %}
+    {% empty %}
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body items-center text-center">
+          <p class="font-bold">未完了のタスクはありません</p>
+          <p class="text-sm text-base-content/60">下のメニューの「追加」から登録できるようになります（準備中）</p>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- 完了したタスク：ふだんは閉じておき、押すと開く -->
+  {% if done_tasks %}
+    <details class="collapse collapse-arrow mt-6 bg-base-100 shadow-sm">
+      <summary class="collapse-title font-bold">完了したタスク（{{ done_tasks|length }}件）</summary>
+      <div class="collapse-content flex flex-col gap-3">
+        {% for task in done_tasks %}
+          {% include "tasks/_task_card.html" with task=task %}
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
 {% endblock %}

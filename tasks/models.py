@@ -104,6 +104,25 @@ class Task(models.Model):
             self.done_at = None
         super().save(*args, **kwargs)
 
+    def due_status(self, now=None):
+        """締切の状態を返す。画面で色を変えるのに使う。
+
+        "overdue"：締切を過ぎた（未完了のとき）／"today"：今日が締切／
+        "soon"：3日以内／"later"：それより先／None：締切なし
+        """
+        if self.due_at is None:
+            return None
+        now = timezone.localtime(now or timezone.now())
+        due = timezone.localtime(self.due_at)
+        if not self.is_done and due < now:
+            return "overdue"
+        days = (due.date() - now.date()).days
+        if days <= 0:
+            return "today"
+        if days <= 3:
+            return "soon"
+        return "later"
+
     def progress(self):
         """子タスクのうち完了したものの割合（0～100）。子がなければ None。"""
         children = list(self.children.all())
