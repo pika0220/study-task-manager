@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block title %}ホーム{% endblock %}
+
+{% block content %}
+  <h1>ようこそ，{{ user.username }} さん</h1>
+  <p>未完了のタスク：{{ open_count }} 件</p>
+  <p>（タスクの一覧は次のIssueで作ります）</p>
+{% endblock %}

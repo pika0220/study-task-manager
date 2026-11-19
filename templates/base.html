@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <!-- スマホの画面幅に合わせて表示する -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}タスク管理{% endblock %}</title>
+  <!-- 見た目はホーム画面のIssueで整える。今は読みやすさのための最低限だけ -->
+  <style>
+    body { font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; line-height: 1.6; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ccc; margin-bottom: 16px; }
+    .errorlist { color: #c00; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>タスク管理</strong>
+    {% if user.is_authenticated %}
+      <!-- ログアウトは安全のためPOSTで送る（Django 5からの決まり） -->
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <span>{{ user.username }} さん</span>
+        <button type="submit">ログアウト</button>
+      </form>
+    {% endif %}
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
