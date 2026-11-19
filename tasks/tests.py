@@ -66,6 +66,57 @@ class HomeViewTests(TestCase):
         self.assertContains(response, "未完了のタスクはありません")
 
 
+
+class TaskCreateViewTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.url = reverse("task_create")
+
+    def test_anonymous_user_is_sent_to_login(self):
+        response = self.client.get(self.url)
+        self.assertRedirects(response, reverse("login") + "?next=" + self.url)
+
+    def test_create_with_title_only(self):
+        self.client.force_login(self.me)
+        response = self.client.post(
+            self.url, {"title": "実習記録を書く", "importance": 2, "category": "practicum"}, follow=True
+        )
+        self.assertRedirects(response, reverse("home"))
+        task = Task.objects.get(title="実習記録を書く")
+        self.assertEqual(task.owner, self.me)
+        self.assertIsNone(task.due_at)
+        # ホームに戻ると、お知らせとカードが出る
+        self.assertContains(response, "「実習記録を書く」を登録しました")
+        self.assertEqual([t.title for t in response.context["open_tasks"]], ["実習記録を書く"])
+
+    def test_owner_cannot_be_changed_from_form(self):
+        # フォームに owner を混ぜて送っても、持ち主はログイン中の本人になる
+        self.client.force_login(self.me)
+        self.client.post(
+            self.url,
+            {"title": "なりすまし", "importance": 2, "category": "class", "owner": self.other.pk},
+        )
+        self.assertEqual(Task.objects.get(title="なりすまし").owner, self.me)
+
+    def test_due_at_from_datetime_local_input(self):
+        # スマホの日時入力（datetime-local）が送ってくる形で受け取れる
+        self.client.force_login(self.me)
+        self.client.post(
+            self.url,
+            {"title": "レポート", "importance": 3, "category": "class", "due_at": "2026-12-01T18:00"},
+        )
+        due = timezone.localtime(Task.objects.get(title="レポート").due_at)
+        self.assertEqual((due.month, due.day, due.hour, due.minute), (12, 1, 18, 0))
+
+    def test_title_is_required(self):
+        self.client.force_login(self.me)
+        response = self.client.post(self.url, {"title": "", "importance": 2, "category": "class"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Task.objects.exists())
+        self.assertContains(response, "このフィールドは必須です")
+
 class TaskModelTests(TestCase):
     def setUp(self):
         User = get_user_model()

@@ -33,6 +33,12 @@
 
   <!-- 画面ごとの中身。ログイン中は下のメニューに隠れないよう下に余白をとる -->
   <main class="mx-auto w-full max-w-md px-4 py-6 {% if user.is_authenticated %}pb-24{% endif %}">
+    <!-- お知らせ（「登録しました」など）。ビューで messages に入れたものが、次の画面で一度だけ出る -->
+    {% for message in messages %}
+      <div role="alert" class="alert {% if message.tags == 'success' %}alert-success{% elif message.tags == 'error' %}alert-error{% else %}alert-info{% endif %} mb-4 text-sm">
+        {{ message }}
+      </div>
+    {% endfor %}
     {% block content %}{% endblock %}
   </main>
 
@@ -43,10 +49,10 @@
         <span class="text-xl" aria-hidden="true">🏠</span>
         <span class="dock-label">ホーム</span>
       </a>
-      <button type="button" class="text-base-content/50" disabled title="準備中">
+      <a href="{% url 'task_create' %}" class="{% if request.resolver_match.url_name == 'task_create' %}dock-active{% endif %}">
         <span class="text-xl" aria-hidden="true">➕</span>
         <span class="dock-label">追加</span>
-      </button>
+      </a>
       <button type="button" class="text-base-content/50" disabled title="準備中">
         <span class="text-xl" aria-hidden="true">📊</span>
         <span class="dock-label">進み具合</span>
