@@ -3,7 +3,14 @@
 {% block title %}ホーム{% endblock %}
 
 {% block content %}
-  <h1>ようこそ，{{ user.username }} さん</h1>
-  <p>未完了のタスク：{{ open_count }} 件</p>
-  <p>（タスクの一覧は次のIssueで作ります）</p>
+  <h1 class="mb-4 text-xl font-bold">ようこそ，{{ user.username }} さん</h1>
+
+  <!-- 数字をひと目で見せるカード（daisyUI の stat） -->
+  <div class="stats w-full bg-base-100 shadow-sm">
+    <div class="stat">
+      <div class="stat-title">未完了のタスク</div>
+      <div class="stat-value text-primary">{{ open_count }}<span class="ml-1 text-base font-normal">件</span></div>
+      <div class="stat-desc whitespace-normal">締切と重要度の順に，次のIssueで一覧を出します</div>
+    </div>
+  </div>
 {% endblock %}

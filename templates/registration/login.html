@@ -3,19 +3,25 @@
 {% block title %}ログイン{% endblock %}
 
 {% block content %}
-  <h1>ログイン</h1>
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h1 class="card-title text-2xl">ログイン</h1>
 
-  {% if form.errors %}
-    <p class="errorlist">ユーザー名かパスワードが違います．</p>
-  {% endif %}
+      {% if form.errors %}
+        <div role="alert" class="alert alert-error text-sm">ユーザー名かパスワードが違います．</div>
+      {% endif %}
 
-  <form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <!-- ログインが必要な画面から来たときは，ログイン後にその画面へ戻す -->
-    <input type="hidden" name="next" value="{{ next }}">
-    <button type="submit">ログイン</button>
-  </form>
+      <form method="post" class="flex flex-col gap-2">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" with hide_non_field_errors=True %}
+        <!-- ログインが必要な画面から来たときは、ログイン後にその画面へ戻す -->
+        <input type="hidden" name="next" value="{{ next }}">
+        <button type="submit" class="btn btn-primary btn-block mt-4">ログイン</button>
+      </form>
 
-  <p>はじめての方は <a href="{% url 'signup' %}">ユーザー登録</a></p>
+      <p class="mt-2 text-center text-sm">
+        はじめての方は <a href="{% url 'signup' %}" class="link link-primary">ユーザー登録</a>
+      </p>
+    </div>
+  </div>
 {% endblock %}

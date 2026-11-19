@@ -42,6 +42,12 @@ class AccountFlowTests(TestCase):
         home = self.client.get(reverse("home"))
         self.assertRedirects(home, reverse("login") + "?next=/")
 
+    def test_forms_have_styled_inputs(self):
+        # ログインと登録の入力欄に daisyUI の class が付いている
+        for name in ("login", "signup"):
+            response = self.client.get(reverse(name))
+            self.assertContains(response, 'class="input w-full"')
+
     def test_wrong_password_shows_error(self):
         get_user_model().objects.create_user("yakugaku", password=self.password)
         response = self.client.post(
