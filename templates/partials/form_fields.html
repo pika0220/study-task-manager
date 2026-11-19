@@ -1,0 +1,23 @@
+{% comment %}
+  フォームの入力欄を daisyUI の見た目で並べる部品。
+  使い方：{% include "partials/form_fields.html" %}（その画面の form を使う）
+  画面の側で独自のエラー文を出すときは with hide_non_field_errors=True を付ける。
+{% endcomment %}
+{% if not hide_non_field_errors %}
+  {% for error in form.non_field_errors %}
+    <div role="alert" class="alert alert-error mb-2 text-sm">{{ error }}</div>
+  {% endfor %}
+{% endif %}
+
+{% for field in form %}
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">{{ field.label }}</legend>
+    {{ field }}
+    {% for error in field.errors %}
+      <p class="text-sm text-error">{{ error }}</p>
+    {% endfor %}
+    {% if field.help_text %}
+      <div class="text-xs text-base-content/60">{{ field.help_text|safe }}</div>
+    {% endif %}
+  </fieldset>
+{% endfor %}

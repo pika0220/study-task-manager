@@ -3,13 +3,19 @@
 {% block title %}ユーザー登録{% endblock %}
 
 {% block content %}
-  <h1>ユーザー登録</h1>
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h1 class="card-title text-2xl">ユーザー登録</h1>
 
-  <form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">登録する</button>
-  </form>
+      <form method="post" class="flex flex-col gap-2">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" %}
+        <button type="submit" class="btn btn-primary btn-block mt-4">登録する</button>
+      </form>
 
-  <p>登録済みの方は <a href="{% url 'login' %}">ログイン</a></p>
+      <p class="mt-2 text-center text-sm">
+        登録済みの方は <a href="{% url 'login' %}" class="link link-primary">ログイン</a>
+      </p>
+    </div>
+  </div>
 {% endblock %}

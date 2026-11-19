@@ -20,7 +20,8 @@ class HomeViewTests(TestCase):
         Task.objects.create(owner=other, title="他の人のタスク")
         self.client.force_login(me)
         response = self.client.get(reverse("home"))
-        self.assertContains(response, "未完了のタスク：1 件")
+        # 画面に渡す数が「自分の未完了だけ」の1件になっている
+        self.assertEqual(response.context["open_count"], 1)
 
 
 class TaskModelTests(TestCase):
