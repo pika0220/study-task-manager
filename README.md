@@ -1,5 +1,7 @@
 # study-task-manager
 
+[![test](https://github.com/pika0220/study-task-manager/actions/workflows/test.yml/badge.svg)](https://github.com/pika0220/study-task-manager/actions/workflows/test.yml)
+
 実習・国家試験の対策・授業の課題を並行して抱える大学生のための、タスク管理Webアプリです。
 
 紙・Classroom・スライドなどに散らばった課題の指示を1か所に集め、長期の目標と日々のタスクを見通せるようにすることを目指しています。

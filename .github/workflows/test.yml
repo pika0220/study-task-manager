@@ -1,0 +1,30 @@
+# GitHub Actions の手順書：Pull Request と main への push のたびに自動でテストする
+name: test
+
+on:
+  pull_request: # Pull Request を作ったとき・PRのブランチに push したとき
+  push:
+    branches: [main] # main に入ったとき（マージしたとき）
+
+jobs:
+  test:
+    name: test # Ruleset の「必須のチェック」にはこの名前で出てくる
+    runs-on: ubuntu-latest # GitHub が用意する Linux のパソコンで動かす
+    steps:
+      - name: コードを取り出す
+        uses: actions/checkout@v4
+
+      - name: uv を入れる
+        uses: astral-sh/setup-uv@v6
+
+      - name: Python と Django などを入れる（uv.lock のとおり）
+        run: uv sync --locked
+
+      - name: 設定に問題がないか確かめる
+        run: uv run python manage.py check
+
+      - name: マイグレーションの作り忘れがないか確かめる
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: テストを実行する
+        run: uv run python manage.py test
