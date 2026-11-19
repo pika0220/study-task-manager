@@ -16,7 +16,8 @@
       <div class="card bg-base-100 shadow-sm">
         <div class="card-body items-center text-center">
           <p class="font-bold">未完了のタスクはありません</p>
-          <p class="text-sm text-base-content/60">下のメニューの「追加」から登録できるようになります（準備中）</p>
+          <p class="text-sm text-base-content/60">下のメニューの「追加」から登録できます</p>
+          <a href="{% url 'task_create' %}" class="btn btn-primary btn-sm mt-2">タスクを追加する</a>
         </div>
       </div>
     {% endfor %}

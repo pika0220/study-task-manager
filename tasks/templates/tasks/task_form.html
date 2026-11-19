@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}タスクの登録{% endblock %}
+
+{% block content %}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h1 class="card-title text-xl">タスクの登録</h1>
+      <p class="text-sm text-base-content/60">タイトルだけでも登録できます．</p>
+
+      <form method="post" class="flex flex-col gap-1">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" %}
+        <div class="mt-4 flex gap-2">
+          <a href="{% url 'home' %}" class="btn flex-1">やめる</a>
+          <button type="submit" class="btn btn-primary flex-1">登録する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
