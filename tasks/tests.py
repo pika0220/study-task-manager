@@ -1,8 +1,26 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.urls import reverse
 
 from .models import Task
+
+
+class HomeViewTests(TestCase):
+    def test_anonymous_user_is_sent_to_login(self):
+        response = self.client.get(reverse("home"))
+        self.assertRedirects(response, reverse("login") + "?next=/")
+
+    def test_home_counts_only_my_open_tasks(self):
+        User = get_user_model()
+        me = User.objects.create_user("student", password="test-pass-123")
+        other = User.objects.create_user("other", password="test-pass-123")
+        Task.objects.create(owner=me, title="日誌を書く")
+        Task.objects.create(owner=me, title="済んだ課題", is_done=True)
+        Task.objects.create(owner=other, title="他の人のタスク")
+        self.client.force_login(me)
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, "未完了のタスク：1 件")
 
 
 class TaskModelTests(TestCase):

@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "accounts",
     "tasks",
 ]
 
@@ -58,7 +59,8 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # 全画面で共通のひな形（base.html など）を置くフォルダ
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -119,6 +121,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+
+# ログイン関係の移動先（urls.py で付けた名前で指定する）
+LOGIN_URL = "login"  # ログインが必要な画面を開いたときに送る先
+LOGIN_REDIRECT_URL = "home"  # ログインした後に移る先
+LOGOUT_REDIRECT_URL = "login"  # ログアウトした後に移る先
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
