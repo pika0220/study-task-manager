@@ -173,6 +173,92 @@ class TaskToggleViewTests(TestCase):
         self.assertContains(response, self.url(self.task))
         self.assertContains(response, "を完了にする")
 
+
+class TaskDetailEditTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.exam = Task.objects.create(owner=self.me, title="国家試験", category="exam")
+        self.client.force_login(self.me)
+
+    def test_detail_shows_task_and_children(self):
+        Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
+        response = self.client.get(reverse("task_detail", args=[self.exam.pk]))
+        self.assertContains(response, "国家試験")
+        self.assertContains(response, "子タスク（1件）")
+        self.assertContains(response, "薬理学")
+        self.assertContains(response, reverse("task_create_child", args=[self.exam.pk]))
+
+    def test_home_card_links_to_detail(self):
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, reverse("task_detail", args=[self.exam.pk]))
+
+    def test_other_users_task_is_404(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        for name in ("task_detail", "task_update", "task_create_child"):
+            response = self.client.get(reverse(name, args=[others.pk]))
+            self.assertEqual(response.status_code, 404, name)
+        # 編集を送っても変わらない
+        self.client.post(reverse("task_update", args=[others.pk]), {"title": "書きかえ", "importance": 2, "category": "class"})
+        others.refresh_from_db()
+        self.assertEqual(others.title, "他の人のタスク")
+
+    def test_edit_task(self):
+        url = reverse("task_update", args=[self.exam.pk])
+        self.assertContains(self.client.get(url), 'value="国家試験"')  # 今の内容が入った状態で開く
+        response = self.client.post(
+            url, {"title": "看護師国家試験", "importance": 3, "category": "exam", "due_at": "2027-02-14T09:00"}, follow=True
+        )
+        self.assertRedirects(response, reverse("task_detail", args=[self.exam.pk]))
+        self.exam.refresh_from_db()
+        self.assertEqual(self.exam.title, "看護師国家試験")
+        self.assertEqual(self.exam.importance, 3)
+        self.assertEqual(self.exam.owner, self.me)
+        self.assertContains(response, "を保存しました")
+
+    def test_add_child_task(self):
+        url = reverse("task_create_child", args=[self.exam.pk])
+        response = self.client.post(url, {"title": "薬理学", "importance": 2, "category": "exam"}, follow=True)
+        self.assertRedirects(response, reverse("task_detail", args=[self.exam.pk]))
+        child = Task.objects.get(title="薬理学")
+        self.assertEqual(child.parent, self.exam)
+        self.assertEqual(child.owner, self.me)
+
+    def test_cannot_add_fourth_level(self):
+        subject = Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
+        chapter = Task.objects.create(owner=self.me, title="第1章", parent=subject)
+        detail = self.client.get(reverse("task_detail", args=[chapter.pk]))
+        self.assertNotContains(detail, reverse("task_create_child", args=[chapter.pk]))
+        self.assertContains(detail, "これ以上子タスクを付けられません")
+        # URLを直接開いても作れず、詳細画面に戻される
+        url = reverse("task_create_child", args=[chapter.pk])
+        response = self.client.post(url, {"title": "4段目", "importance": 2, "category": "exam"})
+        self.assertRedirects(response, reverse("task_detail", args=[chapter.pk]))
+        self.assertFalse(Task.objects.filter(title="4段目").exists())
+
+    def test_model_depth_error_is_shown_on_form(self):
+        # ビューのチェックをすり抜けても、モデルの3段チェックがフォームのエラーとして出る（止まらない）
+        from .forms import TaskForm
+        subject = Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
+        chapter = Task.objects.create(owner=self.me, title="第1章", parent=subject)
+        form = TaskForm(
+            data={"title": "4段目", "importance": 2, "category": "exam"},
+            instance=Task(owner=self.me, parent=chapter),
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("3段まで", " ".join(form.non_field_errors()))
+
+    def test_toggle_returns_to_detail_page(self):
+        detail_url = reverse("task_detail", args=[self.exam.pk])
+        response = self.client.post(reverse("task_toggle", args=[self.exam.pk]), {"next": detail_url})
+        self.assertRedirects(response, detail_url)
+
+    def test_toggle_ignores_outside_next(self):
+        # ほかのサイトのURLを next に入れられても、ホームに戻す
+        response = self.client.post(reverse("task_toggle", args=[self.exam.pk]), {"next": "https://example.com/"})
+        self.assertRedirects(response, reverse("home"))
+
 class TaskModelTests(TestCase):
     def setUp(self):
         User = get_user_model()
