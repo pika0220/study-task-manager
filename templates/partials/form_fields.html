@@ -10,7 +10,8 @@
 {% endif %}
 
 {% for field in form %}
-  <fieldset class="fieldset">
+  <!-- id="field-欄の名前"：画面のJavaScriptから、この欄を見せる・隠すときに使う -->
+  <fieldset class="fieldset" id="field-{{ field.name }}">
     <legend class="fieldset-legend">{{ field.label }}</legend>
     {{ field }}
     {% for error in field.errors %}
