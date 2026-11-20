@@ -1,8 +1,9 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
+from django.views.decorators.http import require_POST
 from django.views.generic import CreateView
 
 from .forms import TaskForm
@@ -46,3 +47,19 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         # 次の画面（ホーム）で一度だけ表示するお知らせ
         messages.success(self.request, f"「{self.object.title}」を登録しました．")
         return response
+
+
+@login_required
+@require_POST  # データを変える操作なので POST だけ受け付ける（GET で来たら 405 を返す）
+def task_toggle(request, pk):
+    """タスクの完了・未完了を切り替えて、ホームに戻る。"""
+    # owner=request.user を条件に入れて、自分のタスクだけを探す。
+    # ほかの人のタスクの番号を送られても「見つからない（404）」になる
+    task = get_object_or_404(Task, pk=pk, owner=request.user)
+    task.is_done = not task.is_done
+    task.save()  # 完了日時（done_at）は Task.save() の中で自動で入る・消える
+    if task.is_done:
+        messages.success(request, f"「{task.title}」を完了にしました．")
+    else:
+        messages.info(request, f"「{task.title}」を未完了に戻しました．")
+    return redirect("home")

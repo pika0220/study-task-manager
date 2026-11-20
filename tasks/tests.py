@@ -117,6 +117,62 @@ class TaskCreateViewTests(TestCase):
         self.assertFalse(Task.objects.exists())
         self.assertContains(response, "このフィールドは必須です")
 
+
+class TaskToggleViewTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.task = Task.objects.create(owner=self.me, title="実習記録を書く")
+
+    def url(self, task):
+        return reverse("task_toggle", args=[task.pk])
+
+    def test_toggle_marks_done_then_undone(self):
+        self.client.force_login(self.me)
+        response = self.client.post(self.url(self.task), follow=True)
+        self.assertRedirects(response, reverse("home"))
+        self.task.refresh_from_db()  # データベースから読み直す
+        self.assertTrue(self.task.is_done)
+        self.assertIsNotNone(self.task.done_at)
+        self.assertContains(response, "「実習記録を書く」を完了にしました")
+        self.assertEqual([t.title for t in response.context["done_tasks"]], ["実習記録を書く"])
+
+        # もう一度押すと未完了に戻る
+        response = self.client.post(self.url(self.task), follow=True)
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+        self.assertIsNone(self.task.done_at)
+        self.assertContains(response, "未完了に戻しました")
+
+    def test_cannot_toggle_other_users_task(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        self.client.force_login(self.me)
+        response = self.client.post(self.url(others))
+        self.assertEqual(response.status_code, 404)
+        others.refresh_from_db()
+        self.assertFalse(others.is_done)
+
+    def test_get_is_not_allowed(self):
+        # リンクを開いただけ（GET）では切り替わらない
+        self.client.force_login(self.me)
+        response = self.client.get(self.url(self.task))
+        self.assertEqual(response.status_code, 405)
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+
+    def test_anonymous_user_is_sent_to_login(self):
+        response = self.client.post(self.url(self.task))
+        self.assertRedirects(response, reverse("login") + "?next=" + self.url(self.task))
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+
+    def test_home_shows_toggle_buttons(self):
+        self.client.force_login(self.me)
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, self.url(self.task))
+        self.assertContains(response, "を完了にする")
+
 class TaskModelTests(TestCase):
     def setUp(self):
         User = get_user_model()
