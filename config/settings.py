@@ -122,6 +122,11 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# アップロードされた写真の保存場所。
+# MEDIA_URL は作らず、urls.py でもこのフォルダを公開しない。写真は tasks.views.source_photo が
+# 持ち主かどうかを確かめてから返す。
+MEDIA_ROOT = BASE_DIR / "media"
+
 # ログイン関係の移動先（urls.py で付けた名前で指定する）
 LOGIN_URL = "login"  # ログインが必要な画面を開いたときに送る先
 LOGIN_REDIRECT_URL = "home"  # ログインした後に移る先

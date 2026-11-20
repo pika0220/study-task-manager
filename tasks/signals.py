@@ -5,10 +5,10 @@
 """
 
 from django.conf import settings
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from .models import DEFAULT_CATEGORY_NAMES, Category
+from .models import DEFAULT_CATEGORY_NAMES, Category, Source
 
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
@@ -18,3 +18,11 @@ def create_default_categories(sender, instance, created, **kwargs):
         Category.objects.bulk_create(
             [Category(owner=instance, name=name) for name in DEFAULT_CATEGORY_NAMES]
         )
+
+
+@receiver(post_delete, sender=Source)
+def delete_source_photo(sender, instance, **kwargs):
+    # 資料を消したとき（タスクやユーザーを消して一緒に消えたときも）、写真のファイルも消す。
+    # データベースの記録だけ消えて、ファイルがサーバーに残り続けないようにする。
+    if instance.photo:
+        instance.photo.delete(save=False)

@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import IntegrityError, transaction
 from django.db.models import Count
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -68,7 +69,7 @@ class TaskDetailView(OwnTaskMixin, DetailView):
         context["can_add_child"] = depth < Task.MAX_DEPTH
         # この画面に並ぶ子タスクのカードが何段目か（カードの中の「＋ 子タスクを追加」を出すかどうかに使う）
         context["child_level"] = depth + 1
-        # 出どころを足すフォーム（空の状態）
+        # 資料を足すフォーム（空の状態）
         context["source_form"] = SourceForm()
         return context
 
@@ -253,20 +254,21 @@ def category_delete(request, pk):
     return redirect("category_list")
 
 
-# ---- 指示の出どころ（F-04）----
+# ---- 資料（F-04。最初は「出どころ」という名前だった）----
 
 
 @login_required
 @require_POST
 def source_create(request, pk):
-    """タスクに出どころを足して、詳細画面に戻る。"""
+    """タスクに資料を足して、詳細画面に戻る。"""
     task = get_object_or_404(request.user.tasks, pk=pk)  # 自分のタスクにだけ足せる
-    form = SourceForm(request.POST, instance=Source(task=task))
+    # request.FILES：フォームで送られたファイル（写真）はここに入る
+    form = SourceForm(request.POST, request.FILES, instance=Source(task=task), owner=request.user)
     if form.is_valid():
         form.save()
-        messages.success(request, "出どころを追加しました．")
+        messages.success(request, "資料を追加しました．")
     else:
-        # 入力のまちがいを、お知らせとして出す（例：リンクかメモのどちらかを入れてください）
+        # 入力のまちがいを、お知らせとして出す（例：リンク・メモ・写真のどれか1つ以上を入れてください）
         for errors in form.errors.values():
             for error in errors:
                 messages.error(request, error)
@@ -276,10 +278,25 @@ def source_create(request, pk):
 @login_required
 @require_POST
 def source_delete(request, pk):
-    """出どころを消して、詳細画面に戻る。"""
-    # task__owner：出どころ → タスク → 持ち主、とたどって、自分のものだけを探す
+    """資料を消して、詳細画面に戻る。写真のファイルはシグナル（signals.py）で一緒に消える。"""
+    # task__owner：資料 → タスク → 持ち主、とたどって、自分のものだけを探す
     source = get_object_or_404(Source, pk=pk, task__owner=request.user)
     task_pk = source.task_id
     source.delete()
-    messages.success(request, "出どころを消しました．")
+    messages.success(request, "資料を消しました．")
     return redirect("task_detail", pk=task_pk)
+
+
+@login_required
+def source_photo(request, pk):
+    """資料の写真を返す。持ち主だけが見られる（ほかの人は404）。
+
+    写真のフォルダは公開していないので、写真を見るにはこの画面を通るしかない。
+    """
+    source = get_object_or_404(Source, pk=pk, task__owner=request.user)
+    if not source.photo:
+        raise Http404
+    response = FileResponse(source.photo.open("rb"), content_type="image/jpeg")
+    # private：ブラウザ以外（途中のサーバーなど）に写真を保存させない
+    response["Cache-Control"] = "private, max-age=3600"
+    return response

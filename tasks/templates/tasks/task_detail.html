@@ -57,9 +57,9 @@
     </div>
   </div>
 
-  <!-- 指示の出どころ（F-04）：この課題の指示がどこにあったか -->
+  <!-- 資料（F-04）：課題の指示に関係するもの（プリント・スライド・リンク・メモ・写真） -->
   <div class="mt-6 mb-3 flex items-center justify-between gap-2">
-    <h2 class="text-lg font-bold">出どころ（{{ task.sources.all|length }}件）</h2>
+    <h2 class="text-lg font-bold">資料（{{ task.sources.all|length }}件）</h2>
   </div>
   <div class="card bg-base-100 shadow-sm">
     <div class="card-body gap-3 p-4">
@@ -68,6 +68,13 @@
           <span class="badge badge-outline badge-sm mt-1 shrink-0">{{ source.get_kind_display }}</span>
           <div class="min-w-0 flex-1 text-sm">
             {% if source.memo %}<p class="break-words">{{ source.memo }}</p>{% endif %}
+            {% if source.photo %}
+              <!-- 写真は持ち主だけが見られる画面（source_photo）から読み込む。押すと別のタブで大きく見られる -->
+              <a href="{% url 'source_photo' source.pk %}" target="_blank" rel="noopener noreferrer" class="mt-1 block w-fit">
+                <img src="{% url 'source_photo' source.pk %}" alt="資料の写真" loading="lazy"
+                     class="max-h-40 rounded-lg border border-base-300 object-contain">
+              </a>
+            {% endif %}
             {% if source.url %}
               <!-- target="_blank"：別のタブで開く。rel="noopener noreferrer"：開いた先からこのアプリを操作されないようにする -->
               <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer"
@@ -75,20 +82,21 @@
             {% endif %}
           </div>
           <form method="post" action="{% url 'source_delete' source.pk %}" class="shrink-0"
-                onsubmit="return confirm('この出どころを消しますか？')">
+                onsubmit="return confirm('この資料を消しますか？{% if source.photo %}写真も消えます．{% endif %}')">
             {% csrf_token %}
             <button type="submit" class="btn btn-ghost btn-sm min-h-11 text-error">消す</button>
           </form>
         </div>
       {% empty %}
-        <p class="text-sm text-base-content/60">紙のプリント・Classroom・スライドなど，指示がどこにあったかを残しておけます．</p>
+        <p class="text-sm text-base-content/60">プリントの写真・スライドやClassroomのリンク・口頭で言われたことのメモなど，課題の指示に関係するものを残しておけます．</p>
       {% endfor %}
 
-      <!-- 出どころを足すフォーム（押すと開く） -->
+      <!-- 資料を足すフォーム（押すと開く） -->
       <details {% if not task.sources.all %}open{% endif %}>
-        <summary class="flex min-h-11 cursor-pointer list-none items-center font-bold text-primary [&::-webkit-details-marker]:hidden">＋ 出どころを追加</summary>
-        <p class="text-sm text-base-content/70">リンクかメモの，どちらか1つ以上を入れてください（両方でもかまいません）．</p>
-        <form method="post" action="{% url 'source_create' task.pk %}" class="flex flex-col gap-1">
+        <summary class="flex min-h-11 cursor-pointer list-none items-center font-bold text-primary [&::-webkit-details-marker]:hidden">＋ 資料を追加</summary>
+        <p class="text-sm text-base-content/70">リンク・メモ・写真の，どれか1つ以上を入れてください（いくつ入れてもかまいません）．</p>
+        <!-- enctype="multipart/form-data"：ファイル（写真）を送るフォームに必要な設定 -->
+        <form method="post" action="{% url 'source_create' task.pk %}" enctype="multipart/form-data" class="flex flex-col gap-1">
           {% csrf_token %}
           {% with form=source_form %}
             {% include "partials/form_fields.html" %}

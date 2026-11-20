@@ -4,7 +4,7 @@ from .models import Category, Source, Task
 
 
 class SourceInline(admin.TabularInline):
-    # タスクの編集画面の中で、出どころも一緒に見たり足したりできるようにする
+    # タスクの編集画面の中で、資料も一緒に見たり足したりできるようにする
     model = Source
     extra = 0
 
