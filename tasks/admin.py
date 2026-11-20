@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import Category, Task
+from .models import Category, Source, Task
+
+
+class SourceInline(admin.TabularInline):
+    # タスクの編集画面の中で、出どころも一緒に見たり足したりできるようにする
+    model = Source
+    extra = 0
 
 
 @admin.register(Task)
@@ -13,6 +19,7 @@ class TaskAdmin(admin.ModelAdmin):
     search_fields = ("title", "memo")
     # 自動で入る項目は編集できないようにする
     readonly_fields = ("done_at", "created_at", "updated_at")
+    inlines = [SourceInline]
 
 
 @admin.register(Category)

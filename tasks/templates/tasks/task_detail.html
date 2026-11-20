@@ -57,6 +57,48 @@
     </div>
   </div>
 
+  <!-- 指示の出どころ（F-04）：この課題の指示がどこにあったか -->
+  <div class="mt-6 mb-3 flex items-center justify-between gap-2">
+    <h2 class="text-lg font-bold">出どころ（{{ task.sources.all|length }}件）</h2>
+  </div>
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body gap-3 p-4">
+      {% for source in task.sources.all %}
+        <div class="flex items-start gap-2 border-b border-base-200 pb-3">
+          <span class="badge badge-outline badge-sm mt-1 shrink-0">{{ source.get_kind_display }}</span>
+          <div class="min-w-0 flex-1 text-sm">
+            {% if source.memo %}<p class="break-words">{{ source.memo }}</p>{% endif %}
+            {% if source.url %}
+              <!-- target="_blank"：別のタブで開く。rel="noopener noreferrer"：開いた先からこのアプリを操作されないようにする -->
+              <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer"
+                 class="link link-primary inline-flex min-h-11 items-center break-all">🔗 {{ source.url|truncatechars:40 }}</a>
+            {% endif %}
+          </div>
+          <form method="post" action="{% url 'source_delete' source.pk %}" class="shrink-0"
+                onsubmit="return confirm('この出どころを消しますか？')">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-ghost btn-sm min-h-11 text-error">消す</button>
+          </form>
+        </div>
+      {% empty %}
+        <p class="text-sm text-base-content/60">紙のプリント・Classroom・スライドなど，指示がどこにあったかを残しておけます．</p>
+      {% endfor %}
+
+      <!-- 出どころを足すフォーム（押すと開く） -->
+      <details {% if not task.sources.all %}open{% endif %}>
+        <summary class="flex min-h-11 cursor-pointer list-none items-center font-bold text-primary [&::-webkit-details-marker]:hidden">＋ 出どころを追加</summary>
+        <p class="text-sm text-base-content/70">リンクかメモの，どちらか1つ以上を入れてください（両方でもかまいません）．</p>
+        <form method="post" action="{% url 'source_create' task.pk %}" class="flex flex-col gap-1">
+          {% csrf_token %}
+          {% with form=source_form %}
+            {% include "partials/form_fields.html" %}
+          {% endwith %}
+          <button type="submit" class="btn btn-primary mt-2">追加する</button>
+        </form>
+      </details>
+    </div>
+  </div>
+
   <!-- 子タスクの一覧 -->
   <div class="mt-6 mb-3 flex items-center justify-between gap-2">
     <h2 class="text-lg font-bold">子タスク（{{ task.children.all|length }}件）</h2>

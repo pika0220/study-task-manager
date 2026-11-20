@@ -45,6 +45,10 @@
         {% else %}
           <span class="text-base-content/50">締切なし</span>
         {% endif %}
+        <!-- 出どころが付いていれば、その数を出す -->
+        {% with n=task.sources.all|length %}
+          {% if n %}<span class="text-base-content/70" title="出どころ {{ n }}件">📎 {{ n }}</span>{% endif %}
+        {% endwith %}
       </div>
 
       <!-- 子タスクがあれば「▶ 子タスク○件」を出し、押すとカードの中に開く -->

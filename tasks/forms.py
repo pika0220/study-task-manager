@@ -5,7 +5,7 @@ from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .models import Category, Task
+from .models import Category, Source, Task
 
 NEW_CATEGORY = "__new__"  # 分類の選択肢「＋ 新しい分類…」の値
 
@@ -166,3 +166,25 @@ class TaskForm(forms.ModelForm):
                 error_dict.setdefault(NON_FIELD_ERRORS, []).extend(parent_errors)
                 error = ValidationError(error_dict)
         super().add_error(field, error)
+
+
+class SourceForm(forms.ModelForm):
+    """指示の出どころを足すフォーム。詳細画面の中に小さく置く。"""
+
+    # assume_scheme="https"：「example.com」のように http を省いて書かれたら https:// を補う
+    url = forms.URLField(
+        label="リンク",
+        required=False,
+        max_length=500,
+        assume_scheme="https",
+        widget=forms.URLInput(attrs={"class": "input w-full", "placeholder": "https://..."}),
+    )
+
+    class Meta:
+        model = Source
+        fields = ["kind", "url", "memo"]
+        labels = {"memo": "メモ"}
+        widgets = {
+            "kind": forms.Select(attrs={"class": "select w-full"}),
+            "memo": forms.TextInput(attrs={"class": "input w-full", "placeholder": "例：3限の配布プリント"}),
+        }

@@ -9,8 +9,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, UpdateView
 
-from .forms import TaskForm
-from .models import Task
+from .forms import SourceForm, TaskForm
+from .models import Source, Task
 
 
 @login_required  # ログインしていない人はログイン画面に送られる
@@ -22,7 +22,7 @@ def home(request):
     tasks = (
         request.user.tasks.filter(parent=None)
         .select_related("category")
-        .prefetch_related("children__children__children")
+        .prefetch_related("children__children__children", "sources")
     )
     # 並び順はモデルの Meta.ordering（未完了 → 重要度が高い → 締切が近い）のまま
     open_tasks = [task for task in tasks if not task.is_done]
@@ -58,7 +58,7 @@ class TaskDetailView(OwnTaskMixin, DetailView):
             super()
             .get_queryset()
             .select_related("parent", "category")
-            .prefetch_related("children__children__children", "children__category")
+            .prefetch_related("children__children__children", "children__category", "children__sources", "sources")
         )
 
     def get_context_data(self, **kwargs):
@@ -68,6 +68,8 @@ class TaskDetailView(OwnTaskMixin, DetailView):
         context["can_add_child"] = depth < Task.MAX_DEPTH
         # この画面に並ぶ子タスクのカードが何段目か（カードの中の「＋ 子タスクを追加」を出すかどうかに使う）
         context["child_level"] = depth + 1
+        # 出どころを足すフォーム（空の状態）
+        context["source_form"] = SourceForm()
         return context
 
 
@@ -249,3 +251,35 @@ def category_delete(request, pk):
     else:
         messages.success(request, f"分類「{name}」を消しました．")
     return redirect("category_list")
+
+
+# ---- 指示の出どころ（F-04）----
+
+
+@login_required
+@require_POST
+def source_create(request, pk):
+    """タスクに出どころを足して、詳細画面に戻る。"""
+    task = get_object_or_404(request.user.tasks, pk=pk)  # 自分のタスクにだけ足せる
+    form = SourceForm(request.POST, instance=Source(task=task))
+    if form.is_valid():
+        form.save()
+        messages.success(request, "出どころを追加しました．")
+    else:
+        # 入力のまちがいを、お知らせとして出す（例：リンクかメモのどちらかを入れてください）
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+    return redirect("task_detail", pk=task.pk)
+
+
+@login_required
+@require_POST
+def source_delete(request, pk):
+    """出どころを消して、詳細画面に戻る。"""
+    # task__owner：出どころ → タスク → 持ち主、とたどって、自分のものだけを探す
+    source = get_object_or_404(Source, pk=pk, task__owner=request.user)
+    task_pk = source.task_id
+    source.delete()
+    messages.success(request, "出どころを消しました．")
+    return redirect("task_detail", pk=task_pk)

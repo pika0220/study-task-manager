@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db import models
 from django.db.models import F
 from django.utils import timezone
@@ -157,3 +158,47 @@ class Task(models.Model):
             return None
         done = sum(1 for child in children if child.is_done)
         return round(done * 100 / len(children))
+
+
+class Source(models.Model):
+    """指示の出どころ（F-04）。「この課題の指示はどこにあったか」を記録する。1つのタスクに複数付けられる。"""
+
+    class Kind(models.TextChoices):
+        PAPER = "paper", "紙"
+        CLASSROOM = "classroom", "Classroom"
+        SLIDE = "slide", "スライド"
+        VERBAL = "verbal", "口頭"
+        SLACK = "slack", "Slack"
+        EMAIL = "email", "メール"
+        OTHER = "other", "その他"
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,  # タスクを消したら、その出どころも消す
+        related_name="sources",
+        verbose_name="タスク",
+    )
+    kind = models.CharField("種類", max_length=20, choices=Kind.choices, default=Kind.PAPER)
+    url = models.URLField(
+        "リンク",
+        max_length=500,
+        blank=True,
+        # http:// と https:// だけを受け付ける（javascript: などの危ないリンクを入れさせない）
+        validators=[URLValidator(schemes=["http", "https"])],
+    )
+    memo = models.CharField("メモ", max_length=200, blank=True)
+    created_at = models.DateTimeField("作成日時", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "出どころ"
+        verbose_name_plural = "出どころ"
+        ordering = ["created_at", "id"]  # 足した順に並べる
+
+    def __str__(self):
+        return f"{self.get_kind_display()}：{self.memo or self.url}"
+
+    def clean(self):
+        super().clean()
+        # 中身のない記録が増えないよう、リンクかメモのどちらかは必ず入れてもらう
+        if not self.url and not self.memo.strip():
+            raise ValidationError("リンクかメモのどちらかを入れてください．")
