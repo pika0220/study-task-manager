@@ -41,8 +41,9 @@ class HomeViewTests(TestCase):
         self.assertEqual([t.title for t in response.context["done_tasks"]], ["レポート提出"])
         self.assertContains(response, "重要度 高")
         self.assertContains(response, "子タスク 1件・0%")
-        # 子タスクは別のカードにせず、ほかの人のタスクは出さない
-        self.assertNotContains(response, "薬理学の問題集")
+        # 子タスクは別のカードにしない（上の open_tasks が1件）。親のカードの中に1回だけ出る
+        self.assertContains(response, ">薬理学の問題集</a>", count=1)
+        # ほかの人のタスクは出さない
         self.assertNotContains(response, "他の人のタスク")
 
     def test_home_orders_by_importance_then_due(self):
@@ -258,6 +259,41 @@ class TaskDetailEditTests(TestCase):
         # ほかのサイトのURLを next に入れられても、ホームに戻す
         response = self.client.post(reverse("task_toggle", args=[self.exam.pk]), {"next": "https://example.com/"})
         self.assertRedirects(response, reverse("home"))
+
+
+class CardChildrenTests(TestCase):
+    def setUp(self):
+        self.me = get_user_model().objects.create_user("student", password="test-pass-123")
+        self.client.force_login(self.me)
+
+    def test_card_lists_children_and_grandchildren(self):
+        exam = Task.objects.create(owner=self.me, title="国家試験")
+        subject = Task.objects.create(owner=self.me, title="薬理学", parent=exam)
+        Task.objects.create(owner=self.me, title="問題集 第1章", parent=subject, is_done=True)
+        response = self.client.get(reverse("home"))
+        # 子・孫の名前がカードの中（開く部分）に入っていて、それぞれ切り替えボタンと詳細へのリンクがある
+        self.assertContains(response, "子タスク 1件・0%")
+        self.assertContains(response, "子タスク 1件・100%")
+        self.assertContains(response, "薬理学")
+        self.assertContains(response, "問題集 第1章")
+        self.assertContains(response, reverse("task_toggle", args=[subject.pk]))
+        self.assertContains(response, reverse("task_detail", args=[subject.pk]))
+        self.assertContains(response, "<details", count=2)
+
+    def test_card_without_children_has_no_toggle(self):
+        Task.objects.create(owner=self.me, title="履修登録")
+        response = self.client.get(reverse("home"))
+        self.assertNotContains(response, "<details>")
+
+    def test_home_query_count_does_not_grow_with_children(self):
+        # 子タスクが増えても、データベースへの問い合わせの回数は増えない（まとめて読み込んでいる）
+        exam = Task.objects.create(owner=self.me, title="国家試験")
+        for i in range(5):
+            sub = Task.objects.create(owner=self.me, title=f"科目{i}", parent=exam)
+            Task.objects.create(owner=self.me, title=f"章{i}", parent=sub)
+        self.client.get(reverse("home"))  # 1回目はセッションなどの準備があるので数えない
+        with self.assertNumQueries(6):
+            self.client.get(reverse("home"))
 
 class TaskModelTests(TestCase):
     def setUp(self):

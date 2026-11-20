@@ -13,9 +13,9 @@
       <!-- 押したあと、今いる画面（ホームや詳細画面）に戻るための情報 -->
       <input type="hidden" name="next" value="{{ request.get_full_path }}">
       {% if task.is_done %}
-        <button type="submit" class="btn btn-circle btn-success btn-sm" aria-label="「{{ task.title }}」を未完了に戻す">✓</button>
+        <button type="submit" class="btn btn-circle btn-success btn-md relative after:absolute after:-inset-1 after:content-['']" aria-label="「{{ task.title }}」を未完了に戻す">✓</button>
       {% else %}
-        <button type="submit" class="btn btn-circle btn-outline btn-sm" aria-label="「{{ task.title }}」を完了にする"></button>
+        <button type="submit" class="btn btn-circle btn-outline btn-md relative after:absolute after:-inset-1 after:content-['']" aria-label="「{{ task.title }}」を完了にする"></button>
       {% endif %}
     </form>
 
@@ -47,14 +47,8 @@
         {% endif %}
       </div>
 
-      {% with total=task.children.all|length %}
-        {% if total %}
-          <div class="flex items-center gap-2 text-xs">
-            <progress class="progress progress-primary w-full" value="{{ task.progress }}" max="100"></progress>
-            <span class="shrink-0">子タスク {{ total }}件・{{ task.progress }}%</span>
-          </div>
-        {% endif %}
-      {% endwith %}
+      <!-- 子タスクがあれば「▶ 子タスク○件」を出し、押すとカードの中に開く -->
+      {% include "tasks/_children_toggle.html" with parent=task %}
     </div>
   </div>
 </article>
