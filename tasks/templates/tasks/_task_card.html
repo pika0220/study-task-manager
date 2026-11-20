@@ -32,7 +32,7 @@
       </div>
 
       <div class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="badge badge-outline badge-sm">{{ task.get_category_display }}</span>
+        <span class="badge badge-outline badge-sm">{{ task.category.name|default:"分類なし" }}</span>
         {% if task.due_at %}
           {% with status=task.due_status %}
             {% if status == "overdue" %}

@@ -5,18 +5,40 @@ from django.db.models import F
 from django.utils import timezone
 
 
+# ユーザー登録のときに用意する分類（名前の変更や削除もできる）
+DEFAULT_CATEGORY_NAMES = ["授業", "実習", "資格対策", "研究"]
+
+
+class Category(models.Model):
+    """タスクの分類。ユーザーごとに持ち、自分で足したり名前を変えたりできる。"""
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,  # ユーザーを消したら、その人の分類も消す
+        related_name="categories",
+        verbose_name="持ち主",
+    )
+    name = models.CharField("名前", max_length=50)
+    created_at = models.DateTimeField("作成日時", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "分類"
+        verbose_name_plural = "分類"
+        ordering = ["created_at", "id"]  # 作った順に並べる
+        constraints = [
+            # 同じ人が同じ名前の分類を2つ作れないようにする（データベースが守るルール）
+            models.UniqueConstraint(fields=["owner", "name"], name="unique_category_name_per_owner"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Task(models.Model):
     """やること1件を表すモデル。親タスクを持たせることで入れ子（3段まで）にできる。"""
 
     # 入れ子にできる深さの上限（例：国家試験 → 科目 → 問題集の章）
     MAX_DEPTH = 3
-
-    class Category(models.TextChoices):
-        # 左がデータベースに保存する値、右が画面に表示する名前
-        CLASS = "class", "授業"
-        PRACTICUM = "practicum", "実習"
-        EXAM = "exam", "資格対策"
-        RESEARCH = "research", "研究"
 
     class Importance(models.IntegerChoices):
         LOW = 1, "低"
@@ -35,8 +57,13 @@ class Task(models.Model):
     importance = models.PositiveSmallIntegerField(
         "重要度", choices=Importance.choices, default=Importance.MEDIUM
     )
-    category = models.CharField(
-        "分類", max_length=20, choices=Category.choices, default=Category.CLASS
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,  # 分類を消しても、タスクは消さずに「分類なし」にする
+        null=True,
+        blank=True,
+        related_name="tasks",
+        verbose_name="分類",
     )
     parent = models.ForeignKey(
         "self",

@@ -2,8 +2,26 @@ from collections import defaultdict
 
 from django import forms
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+from django.urls import reverse
+from django.utils.html import format_html
 
-from .models import Task
+from .models import Category, Task
+
+NEW_CATEGORY = "__new__"  # 分類の選択肢「＋ 新しい分類…」の値
+
+
+class CategoryChoiceField(forms.ModelChoiceField):
+    """分類を選ぶ欄。ふつうの選択肢に加えて「＋ 新しい分類…」（NEW_CATEGORY）も受け付ける。"""
+
+    def to_python(self, value):
+        if value == NEW_CATEGORY:
+            return NEW_CATEGORY
+        return super().to_python(value)
+
+    def validate(self, value):
+        if value == NEW_CATEGORY:
+            return
+        super().validate(value)
 
 
 def parent_options(user, editing=None):
@@ -62,6 +80,7 @@ class TaskForm(forms.ModelForm):
         model = Task
         fields = ["title", "parent", "due_at", "importance", "category", "memo"]
         labels = {"parent": "親タスク（なくてもよい）"}
+        field_classes = {"category": CategoryChoiceField}
         widgets = {
             "title": forms.TextInput(
                 attrs={"class": "input w-full", "placeholder": "例：実習記録を書く", "autofocus": True}
@@ -77,8 +96,33 @@ class TaskForm(forms.ModelForm):
             "memo": forms.Textarea(attrs={"class": "textarea w-full", "rows": 3}),
         }
 
+    # 「＋ 新しい分類…」を選んだときに名前を書く欄（モデルにはない、フォームだけの欄）
+    new_category_name = forms.CharField(
+        label="新しい分類の名前",
+        max_length=50,
+        required=False,
+        widget=forms.TextInput(attrs={"class": "input w-full", "placeholder": "例：部活"}),
+    )
+
+    field_order = ["title", "parent", "due_at", "importance", "category", "new_category_name", "memo"]
+
     def __init__(self, *args, user, **kwargs):
         super().__init__(*args, **kwargs)
+        self.user = user
+        self._new_category_name = None
+
+        # 分類：自分の分類だけを、作った順に。最後に「＋ 新しい分類…」
+        category = self.fields["category"]
+        category.queryset = user.categories.all()
+        category.choices = (
+            [("", "分類なし")]
+            + [(c.pk, c.name) for c in category.queryset]
+            + [(NEW_CATEGORY, "＋ 新しい分類…")]
+        )
+        category.help_text = format_html(
+            '<a href="{}" class="link">分類の名前を変える・消す</a>', reverse("category_list")
+        )
+
         options = parent_options(user, editing=self.instance)
         field = self.fields["parent"]
         # 選べるのは options に入ったタスクだけ（ほかの番号を送られても「正しくない選択」になる）
@@ -88,6 +132,29 @@ class TaskForm(forms.ModelForm):
             (task.pk, "　" * (depth - 1) + ("└ " if depth > 1 else "") + task.title)
             for task, depth in options
         ]
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("category") == NEW_CATEGORY:
+            name = (cleaned.get("new_category_name") or "").strip()
+            if not name:
+                self.add_error("new_category_name", "新しい分類の名前を入れてください．")
+                cleaned["category"] = None
+            else:
+                # 同じ名前の分類がもうあれば、それを使う（書き方がずれて2つにならないように）
+                existing = self.user.categories.filter(name=name).first()
+                if existing:
+                    cleaned["category"] = existing
+                else:
+                    # 実際に作るのは save() のとき（ほかの欄にエラーがあったら作らない）
+                    self._new_category_name = name
+                    cleaned["category"] = None
+        return cleaned
+
+    def save(self, commit=True):
+        if self._new_category_name:
+            self.instance.category = Category.objects.create(owner=self.user, name=self._new_category_name)
+        return super().save(commit)
 
     def add_error(self, field, error):
         # モデルの clean()（3段までのチェックなど）は、エラーを「parent」の欄に付けて返す。

@@ -82,7 +82,7 @@ class TaskCreateViewTests(TestCase):
     def test_create_with_title_only(self):
         self.client.force_login(self.me)
         response = self.client.post(
-            self.url, {"title": "実習記録を書く", "importance": 2, "category": "practicum"}, follow=True
+            self.url, {"title": "実習記録を書く", "importance": 2}, follow=True
         )
         self.assertRedirects(response, reverse("home"))
         task = Task.objects.get(title="実習記録を書く")
@@ -97,7 +97,7 @@ class TaskCreateViewTests(TestCase):
         self.client.force_login(self.me)
         self.client.post(
             self.url,
-            {"title": "なりすまし", "importance": 2, "category": "class", "owner": self.other.pk},
+            {"title": "なりすまし", "importance": 2, "owner": self.other.pk},
         )
         self.assertEqual(Task.objects.get(title="なりすまし").owner, self.me)
 
@@ -106,14 +106,14 @@ class TaskCreateViewTests(TestCase):
         self.client.force_login(self.me)
         self.client.post(
             self.url,
-            {"title": "レポート", "importance": 3, "category": "class", "due_at": "2026-12-01T18:00"},
+            {"title": "レポート", "importance": 3, "due_at": "2026-12-01T18:00"},
         )
         due = timezone.localtime(Task.objects.get(title="レポート").due_at)
         self.assertEqual((due.month, due.day, due.hour, due.minute), (12, 1, 18, 0))
 
     def test_title_is_required(self):
         self.client.force_login(self.me)
-        response = self.client.post(self.url, {"title": "", "importance": 2, "category": "class"})
+        response = self.client.post(self.url, {"title": "", "importance": 2})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Task.objects.exists())
         self.assertContains(response, "このフィールドは必須です")
@@ -180,7 +180,7 @@ class TaskDetailEditTests(TestCase):
         User = get_user_model()
         self.me = User.objects.create_user("student", password="test-pass-123")
         self.other = User.objects.create_user("other", password="test-pass-123")
-        self.exam = Task.objects.create(owner=self.me, title="国家試験", category="exam")
+        self.exam = Task.objects.create(owner=self.me, title="国家試験")
         self.client.force_login(self.me)
 
     def test_detail_shows_task_and_children(self):
@@ -201,7 +201,7 @@ class TaskDetailEditTests(TestCase):
             response = self.client.get(reverse(name, args=[others.pk]))
             self.assertEqual(response.status_code, 404, name)
         # 編集を送っても変わらない
-        self.client.post(reverse("task_update", args=[others.pk]), {"title": "書きかえ", "importance": 2, "category": "class"})
+        self.client.post(reverse("task_update", args=[others.pk]), {"title": "書きかえ", "importance": 2})
         others.refresh_from_db()
         self.assertEqual(others.title, "他の人のタスク")
 
@@ -209,7 +209,7 @@ class TaskDetailEditTests(TestCase):
         url = reverse("task_update", args=[self.exam.pk])
         self.assertContains(self.client.get(url), 'value="国家試験"')  # 今の内容が入った状態で開く
         response = self.client.post(
-            url, {"title": "看護師国家試験", "importance": 3, "category": "exam", "due_at": "2027-02-14T09:00"}, follow=True
+            url, {"title": "看護師国家試験", "importance": 3, "due_at": "2027-02-14T09:00"}, follow=True
         )
         self.assertRedirects(response, reverse("task_detail", args=[self.exam.pk]))
         self.exam.refresh_from_db()
@@ -223,7 +223,7 @@ class TaskDetailEditTests(TestCase):
         # 詳細画面から開くと、親タスクの欄に最初からそのタスクが選ばれている
         self.assertContains(self.client.get(url), f'<option value="{self.exam.pk}" selected>')
         response = self.client.post(
-            url, {"title": "薬理学", "parent": self.exam.pk, "importance": 2, "category": "exam"}, follow=True
+            url, {"title": "薬理学", "parent": self.exam.pk, "importance": 2}, follow=True
         )
         self.assertRedirects(response, reverse("task_detail", args=[self.exam.pk]))
         child = Task.objects.get(title="薬理学")
@@ -238,7 +238,7 @@ class TaskDetailEditTests(TestCase):
         self.assertContains(detail, "これ以上子タスクを付けられません")
         # URLを直接開いても作れず、詳細画面に戻される
         url = reverse("task_create_child", args=[chapter.pk])
-        response = self.client.post(url, {"title": "4段目", "importance": 2, "category": "exam"})
+        response = self.client.post(url, {"title": "4段目", "importance": 2})
         self.assertRedirects(response, reverse("task_detail", args=[chapter.pk]))
         self.assertFalse(Task.objects.filter(title="4段目").exists())
 
@@ -248,7 +248,7 @@ class TaskDetailEditTests(TestCase):
         subject = Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
         chapter = Task.objects.create(owner=self.me, title="第1章", parent=subject)
         form = TaskForm(
-            data={"title": "4段目", "parent": chapter.pk, "importance": 2, "category": "exam"},
+            data={"title": "4段目", "parent": chapter.pk, "importance": 2},
             instance=Task(owner=self.me),
             user=self.me,
         )
@@ -324,7 +324,7 @@ class ParentSelectTests(TestCase):
     def test_create_child_from_menu(self):
         response = self.client.post(
             reverse("task_create"),
-            {"title": "問題集 第2章", "parent": self.subject.pk, "importance": 2, "category": "exam"},
+            {"title": "問題集 第2章", "parent": self.subject.pk, "importance": 2},
         )
         self.assertRedirects(response, reverse("home"))
         self.assertEqual(Task.objects.get(title="問題集 第2章").parent, self.subject)
@@ -332,7 +332,7 @@ class ParentSelectTests(TestCase):
     def test_cannot_choose_other_users_task(self):
         response = self.client.post(
             reverse("task_create"),
-            {"title": "なりすまし", "parent": self.others.pk, "importance": 2, "category": "class"},
+            {"title": "なりすまし", "parent": self.others.pk, "importance": 2},
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Task.objects.filter(title="なりすまし").exists())
@@ -348,7 +348,7 @@ class ParentSelectTests(TestCase):
         other_top = Task.objects.create(owner=self.me, title="卒業研究")
         self.client.post(
             reverse("task_update", args=[self.chapter.pk]),
-            {"title": "第1章", "parent": other_top.pk, "importance": 2, "category": "exam"},
+            {"title": "第1章", "parent": other_top.pk, "importance": 2},
         )
         self.chapter.refresh_from_db()
         self.assertEqual(self.chapter.parent, other_top)
@@ -359,6 +359,114 @@ class ParentSelectTests(TestCase):
         self.assertContains(response, reverse("task_create_child", args=[self.exam.pk]))
         self.assertContains(response, reverse("task_create_child", args=[self.subject.pk]))
         self.assertNotContains(response, reverse("task_create_child", args=[self.chapter.pk]))
+
+
+class CategoryTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.client.force_login(self.me)
+
+    def test_new_user_gets_default_categories(self):
+        self.assertEqual(
+            list(self.me.categories.values_list("name", flat=True)), ["授業", "実習", "資格対策", "研究"]
+        )
+
+    def test_form_lists_only_my_categories_and_new_option(self):
+        self.other.categories.create(name="他の人の分類")
+        response = self.client.get(reverse("task_create"))
+        labels = [label for value, label in response.context["form"].fields["category"].choices]
+        self.assertEqual(labels, ["分類なし", "授業", "実習", "資格対策", "研究", "＋ 新しい分類…"])
+
+    def test_create_task_with_existing_category(self):
+        practicum = self.me.categories.get(name="実習")
+        self.client.post(reverse("task_create"), {"title": "実習記録", "importance": 2, "category": practicum.pk})
+        self.assertEqual(Task.objects.get(title="実習記録").category, practicum)
+
+    def test_create_task_with_new_category(self):
+        self.client.post(
+            reverse("task_create"),
+            {"title": "大会の準備", "importance": 2, "category": "__new__", "new_category_name": " 部活 "},
+        )
+        task = Task.objects.get(title="大会の準備")
+        self.assertEqual(task.category.name, "部活")  # 前後の空白は取る
+        self.assertEqual(task.category.owner, self.me)
+        # 次からは選択肢に並ぶ
+        labels = [l for v, l in self.client.get(reverse("task_create")).context["form"].fields["category"].choices]
+        self.assertIn("部活", labels)
+
+    def test_new_category_with_existing_name_reuses_it(self):
+        self.client.post(
+            reverse("task_create"),
+            {"title": "日誌", "importance": 2, "category": "__new__", "new_category_name": "実習"},
+        )
+        self.assertEqual(self.me.categories.filter(name="実習").count(), 1)
+        self.assertEqual(Task.objects.get(title="日誌").category.name, "実習")
+
+    def test_new_category_needs_a_name(self):
+        response = self.client.post(
+            reverse("task_create"), {"title": "日誌", "importance": 2, "category": "__new__", "new_category_name": ""}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "新しい分類の名前を入れてください")
+        self.assertFalse(Task.objects.exists())
+
+    def test_new_category_not_created_when_other_field_invalid(self):
+        self.client.post(
+            reverse("task_create"), {"title": "", "importance": 2, "category": "__new__", "new_category_name": "部活"}
+        )
+        self.assertFalse(self.me.categories.filter(name="部活").exists())
+
+    def test_cannot_use_other_users_category(self):
+        others = self.other.categories.get(name="授業")
+        response = self.client.post(reverse("task_create"), {"title": "なりすまし", "importance": 2, "category": others.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Task.objects.filter(title="なりすまし").exists())
+
+    def test_card_shows_category_name(self):
+        Task.objects.create(owner=self.me, title="日誌", category=self.me.categories.get(name="実習"))
+        Task.objects.create(owner=self.me, title="分類なしのタスク")
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, "実習")
+        self.assertContains(response, "分類なし")
+
+    def test_rename_category(self):
+        cls = self.me.categories.get(name="授業")
+        self.client.post(reverse("category_update", args=[cls.pk]), {"name": "講義"})
+        cls.refresh_from_db()
+        self.assertEqual(cls.name, "講義")
+
+    def test_rename_to_existing_name_is_rejected(self):
+        cls = self.me.categories.get(name="授業")
+        response = self.client.post(reverse("category_update", args=[cls.pk]), {"name": "実習"}, follow=True)
+        cls.refresh_from_db()
+        self.assertEqual(cls.name, "授業")
+        self.assertContains(response, "分類「実習」はもうあります")
+
+    def test_delete_category_keeps_tasks(self):
+        research = self.me.categories.get(name="研究")
+        task = Task.objects.create(owner=self.me, title="文献調査", category=research)
+        response = self.client.post(reverse("category_delete", args=[research.pk]), follow=True)
+        self.assertContains(response, "1件のタスクは「分類なし」になりました")
+        task.refresh_from_db()
+        self.assertIsNone(task.category)
+
+    def test_create_category_on_manage_page(self):
+        self.client.post(reverse("category_create"), {"name": "バイト"})
+        self.assertTrue(self.me.categories.filter(name="バイト").exists())
+
+    def test_cannot_change_other_users_category(self):
+        others = self.other.categories.get(name="授業")
+        self.assertEqual(self.client.post(reverse("category_update", args=[others.pk]), {"name": "x"}).status_code, 404)
+        self.assertEqual(self.client.post(reverse("category_delete", args=[others.pk])).status_code, 404)
+        self.assertTrue(self.other.categories.filter(name="授業").exists())
+
+    def test_manage_page_lists_my_categories_with_counts(self):
+        Task.objects.create(owner=self.me, title="日誌", category=self.me.categories.get(name="実習"))
+        response = self.client.get(reverse("category_list"))
+        self.assertContains(response, 'value="実習"')
+        self.assertContains(response, "タスク 1件")
 
 class TaskModelTests(TestCase):
     def setUp(self):

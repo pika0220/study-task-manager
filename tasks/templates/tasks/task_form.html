@@ -25,4 +25,21 @@
       </form>
     </div>
   </div>
+
+  <script>
+    // 分類で「＋ 新しい分類…」を選んだときだけ、名前を書く欄を見せる。
+    // JavaScriptが動かない環境では、欄はずっと見えたまま（それでも登録はできる）
+    (() => {
+      const select = document.querySelector('select[name="category"]');
+      const box = document.getElementById("field-new_category_name");
+      if (!select || !box) return;
+      const update = () => {
+        const isNew = select.value === "__new__";
+        box.hidden = !isNew;
+        if (isNew) box.querySelector("input").focus();
+      };
+      select.addEventListener("change", update);
+      box.hidden = select.value !== "__new__";
+    })();
+  </script>
 {% endblock %}

@@ -25,7 +25,7 @@
       <!-- 項目名と中身を2列で並べる -->
       <dl class="grid grid-cols-[5rem_1fr] gap-y-2 text-sm">
         <dt class="text-base-content/60">分類</dt>
-        <dd>{{ task.get_category_display }}</dd>
+        <dd>{{ task.category.name|default:"分類なし" }}</dd>
         <dt class="text-base-content/60">締切</dt>
         <dd>
           {% if task.due_at %}

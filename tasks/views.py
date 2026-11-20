@@ -1,6 +1,8 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import IntegrityError, transaction
+from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -16,7 +18,12 @@ def home(request):
     """ホーム画面。自分のタスクを、未完了と完了に分けてカードで並べる。"""
     # 一番上の段（親のないタスク）だけを並べる。子タスク・孫タスクはカードの中で開いて見せる。
     # prefetch_related：子・孫・ひ孫をまとめて読み込み、カードごとにデータベースへ聞きに行かないようにする
-    tasks = request.user.tasks.filter(parent=None).prefetch_related("children__children__children")
+    # select_related("category")：カードに出す分類の名前も、同じ問い合わせで一緒に読む
+    tasks = (
+        request.user.tasks.filter(parent=None)
+        .select_related("category")
+        .prefetch_related("children__children__children")
+    )
     # 並び順はモデルの Meta.ordering（未完了 → 重要度が高い → 締切が近い）のまま
     open_tasks = [task for task in tasks if not task.is_done]
     done_tasks = [task for task in tasks if task.is_done]
@@ -47,7 +54,12 @@ class TaskDetailView(OwnTaskMixin, DetailView):
 
     def get_queryset(self):
         # 親（パンくず用）と、子・孫・ひ孫タスク（カードの中で開く用）をまとめて読み込む
-        return super().get_queryset().select_related("parent").prefetch_related("children__children__children")
+        return (
+            super()
+            .get_queryset()
+            .select_related("parent", "category")
+            .prefetch_related("children__children__children", "children__category")
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -165,3 +177,75 @@ def task_toggle(request, pk):
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
     return redirect("home")
+
+
+# ---- 分類の管理（名前の変更・追加・削除）----
+
+CATEGORY_NAME_MAX = 50
+
+
+def _clean_category_name(request, name):
+    """分類の名前を確かめる。だめならお知らせを出して None を返す。"""
+    name = (name or "").strip()
+    if not name:
+        messages.error(request, "分類の名前を入れてください．")
+        return None
+    if len(name) > CATEGORY_NAME_MAX:
+        messages.error(request, f"分類の名前は{CATEGORY_NAME_MAX}文字までです．")
+        return None
+    return name
+
+
+@login_required
+def category_list(request):
+    """分類の一覧。名前の変更・追加・削除をこの画面で行う。"""
+    # annotate(task_count=Count("tasks"))：分類ごとのタスクの数を、一緒に数えて持ってくる
+    categories = request.user.categories.annotate(task_count=Count("tasks"))
+    return render(request, "tasks/category_list.html", {"categories": categories})
+
+
+@login_required
+@require_POST
+def category_create(request):
+    name = _clean_category_name(request, request.POST.get("name"))
+    if name:
+        _, created = request.user.categories.get_or_create(name=name)
+        if created:
+            messages.success(request, f"分類「{name}」を作りました．")
+        else:
+            messages.info(request, f"分類「{name}」はもうあります．")
+    return redirect("category_list")
+
+
+@login_required
+@require_POST
+def category_update(request, pk):
+    category = get_object_or_404(request.user.categories, pk=pk)
+    name = _clean_category_name(request, request.POST.get("name"))
+    if name and name != category.name:
+        old = category.name
+        category.name = name
+        try:
+            # atomic：失敗したときに、データベースの作業をここだけ取り消して、ほかの作業を続けられるようにする
+            with transaction.atomic():
+                category.save()
+        except IntegrityError:
+            # 同じ名前の分類がもうある（データベースのルールで止まった）
+            messages.error(request, f"分類「{name}」はもうあります．")
+        else:
+            messages.success(request, f"「{old}」を「{name}」に変えました．")
+    return redirect("category_list")
+
+
+@login_required
+@require_POST
+def category_delete(request, pk):
+    category = get_object_or_404(request.user.categories, pk=pk)
+    count = category.tasks.count()
+    name = category.name
+    category.delete()  # この分類のタスクは消えずに「分類なし」になる（on_delete=SET_NULL）
+    if count:
+        messages.success(request, f"分類「{name}」を消しました．この分類だった{count}件のタスクは「分類なし」になりました．")
+    else:
+        messages.success(request, f"分類「{name}」を消しました．")
+    return redirect("category_list")
