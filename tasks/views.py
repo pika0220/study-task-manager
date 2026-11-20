@@ -14,9 +14,9 @@ from .models import Task
 @login_required  # ログインしていない人はログイン画面に送られる
 def home(request):
     """ホーム画面。自分のタスクを、未完了と完了に分けてカードで並べる。"""
-    # 一番上の段（親のないタスク）だけを並べる。子タスクはカードの中で進み具合として見せる。
-    # prefetch_related：子タスクをまとめて1回で読み込み、カードごとにデータベースへ聞きに行かないようにする
-    tasks = request.user.tasks.filter(parent=None).prefetch_related("children")
+    # 一番上の段（親のないタスク）だけを並べる。子タスク・孫タスクはカードの中で開いて見せる。
+    # prefetch_related：子・孫・ひ孫をまとめて読み込み、カードごとにデータベースへ聞きに行かないようにする
+    tasks = request.user.tasks.filter(parent=None).prefetch_related("children__children__children")
     # 並び順はモデルの Meta.ordering（未完了 → 重要度が高い → 締切が近い）のまま
     open_tasks = [task for task in tasks if not task.is_done]
     done_tasks = [task for task in tasks if task.is_done]
@@ -46,8 +46,8 @@ class TaskDetailView(OwnTaskMixin, DetailView):
     template_name = "tasks/task_detail.html"
 
     def get_queryset(self):
-        # 親（パンくず用）と、子タスク・孫タスク（進み具合用）をまとめて読み込む
-        return super().get_queryset().select_related("parent").prefetch_related("children__children")
+        # 親（パンくず用）と、子・孫・ひ孫タスク（カードの中で開く用）をまとめて読み込む
+        return super().get_queryset().select_related("parent").prefetch_related("children__children__children")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

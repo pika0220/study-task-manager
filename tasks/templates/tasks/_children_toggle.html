@@ -1,0 +1,23 @@
+{% comment %}
+  子タスクを開いたり閉じたりする部品。使い方：{% include "tasks/_children_toggle.html" with parent=task %}
+  <details> と <summary>：HTMLにもともとある「押すと開く・閉じる」部品。JavaScriptを書かなくても動く。
+  子タスクの行（_child_row.html）の中でもこの部品を使うので、孫タスクも同じように開ける。
+{% endcomment %}
+{% with total=parent.children.all|length %}
+  {% if total %}
+    <details>
+      <!-- スマホで押しやすいよう、行の高さを44px以上（min-h-11）にし、押したときに色が変わるようにする -->
+      <summary class="-mx-2 flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-sm select-none active:bg-base-200 [&::-webkit-details-marker]:hidden">
+        <!-- 開いているときは ▶ を90度回して ▼ に見せる（自分のすぐ外の details が開いているときだけ回す。孫の▶は別に回る） -->
+        <span class="inline-block w-4 text-center transition-transform [details[open]>summary>&]:rotate-90" aria-hidden="true">▶</span>
+        <progress class="progress progress-primary w-full" value="{{ parent.progress }}" max="100"></progress>
+        <span class="shrink-0 text-xs">子タスク {{ total }}件・{{ parent.progress }}%</span>
+      </summary>
+      <ul class="mt-1 ml-2 flex flex-col border-l-2 border-base-300 pl-3">
+        {% for child in parent.children.all %}
+          {% include "tasks/_child_row.html" with task=child %}
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+{% endwith %}
