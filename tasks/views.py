@@ -51,8 +51,11 @@ class TaskDetailView(OwnTaskMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        depth = self.object.depth()
         # 3段目のタスクには、もう子タスクを付けられない
-        context["can_add_child"] = self.object.depth() < Task.MAX_DEPTH
+        context["can_add_child"] = depth < Task.MAX_DEPTH
+        # この画面に並ぶ子タスクのカードが何段目か（カードの中の「＋ 子タスクを追加」を出すかどうかに使う）
+        context["child_level"] = depth + 1
         return context
 
 
@@ -78,16 +81,26 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
                 return redirect("task_detail", pk=self.parent.pk)
         return super().dispatch(request, *args, **kwargs)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user  # 親タスクの選択肢を「自分のタスク」で作るため
+        return kwargs
+
+    def get_initial(self):
+        # 詳細画面などから来たときは、親タスクの欄に最初からそのタスクを入れておく
+        initial = super().get_initial()
+        if self.parent:
+            initial["parent"] = self.parent.pk
+        return initial
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
-        # 入力のチェック（モデルの clean：3段までなど）の前に、持ち主と親を決めておく
+        # 入力のチェック（モデルの clean：3段までなど）の前に、持ち主を決めておく
         form.instance.owner = self.request.user
-        form.instance.parent = self.parent
         return form
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["parent"] = self.parent
         context["page_title"] = "子タスクの追加" if self.parent else "タスクの登録"
         context["submit_label"] = "追加する" if self.parent else "登録する"
         context["cancel_url"] = reverse("task_detail", args=[self.parent.pk]) if self.parent else reverse("home")
@@ -112,9 +125,13 @@ class TaskUpdateView(OwnTaskMixin, UpdateView):
     form_class = TaskForm
     template_name = "tasks/task_form.html"
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user  # 親タスクの選択肢を「自分のタスク」で作るため
+        return kwargs
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["parent"] = self.object.parent
         context["page_title"] = "タスクの編集"
         context["submit_label"] = "保存する"
         context["cancel_url"] = reverse("task_detail", args=[self.object.pk])
