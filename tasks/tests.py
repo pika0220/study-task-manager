@@ -220,7 +220,11 @@ class TaskDetailEditTests(TestCase):
 
     def test_add_child_task(self):
         url = reverse("task_create_child", args=[self.exam.pk])
-        response = self.client.post(url, {"title": "薬理学", "importance": 2, "category": "exam"}, follow=True)
+        # 詳細画面から開くと、親タスクの欄に最初からそのタスクが選ばれている
+        self.assertContains(self.client.get(url), f'<option value="{self.exam.pk}" selected>')
+        response = self.client.post(
+            url, {"title": "薬理学", "parent": self.exam.pk, "importance": 2, "category": "exam"}, follow=True
+        )
         self.assertRedirects(response, reverse("task_detail", args=[self.exam.pk]))
         child = Task.objects.get(title="薬理学")
         self.assertEqual(child.parent, self.exam)
@@ -238,17 +242,18 @@ class TaskDetailEditTests(TestCase):
         self.assertRedirects(response, reverse("task_detail", args=[chapter.pk]))
         self.assertFalse(Task.objects.filter(title="4段目").exists())
 
-    def test_model_depth_error_is_shown_on_form(self):
-        # ビューのチェックをすり抜けても、モデルの3段チェックがフォームのエラーとして出る（止まらない）
+    def test_third_level_task_cannot_be_chosen_as_parent(self):
+        # 3段目のタスクは親の選択肢に出ず、番号を直接送っても「正しくない選択」になる
         from .forms import TaskForm
         subject = Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
         chapter = Task.objects.create(owner=self.me, title="第1章", parent=subject)
         form = TaskForm(
-            data={"title": "4段目", "importance": 2, "category": "exam"},
-            instance=Task(owner=self.me, parent=chapter),
+            data={"title": "4段目", "parent": chapter.pk, "importance": 2, "category": "exam"},
+            instance=Task(owner=self.me),
+            user=self.me,
         )
         self.assertFalse(form.is_valid())
-        self.assertIn("3段まで", " ".join(form.non_field_errors()))
+        self.assertIn("parent", form.errors)
 
     def test_toggle_returns_to_detail_page(self):
         detail_url = reverse("task_detail", args=[self.exam.pk])
@@ -294,6 +299,66 @@ class CardChildrenTests(TestCase):
         self.client.get(reverse("home"))  # 1回目はセッションなどの準備があるので数えない
         with self.assertNumQueries(6):
             self.client.get(reverse("home"))
+
+
+class ParentSelectTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.exam = Task.objects.create(owner=self.me, title="国家試験")
+        self.subject = Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
+        self.chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.subject)
+        self.done = Task.objects.create(owner=self.me, title="履修登録", is_done=True)
+        self.others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        self.client.force_login(self.me)
+
+    def choices(self, response):
+        return [label for value, label in response.context["form"].fields["parent"].choices]
+
+    def test_create_form_lists_parents_as_tree(self):
+        labels = self.choices(self.client.get(reverse("task_create")))
+        # 親の下に子が字下げされて並ぶ。3段目・完了・他の人のタスクは出ない
+        self.assertEqual(labels, ["なし（一番上のタスク）", "国家試験", "　└ 薬理学"])
+
+    def test_create_child_from_menu(self):
+        response = self.client.post(
+            reverse("task_create"),
+            {"title": "問題集 第2章", "parent": self.subject.pk, "importance": 2, "category": "exam"},
+        )
+        self.assertRedirects(response, reverse("home"))
+        self.assertEqual(Task.objects.get(title="問題集 第2章").parent, self.subject)
+
+    def test_cannot_choose_other_users_task(self):
+        response = self.client.post(
+            reverse("task_create"),
+            {"title": "なりすまし", "parent": self.others.pk, "importance": 2, "category": "class"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Task.objects.filter(title="なりすまし").exists())
+
+    def test_edit_hides_self_descendants_and_too_deep(self):
+        # 薬理学（下に1段ある）を編集するとき：自分と子孫は出ない。2段目の下に付けると4段になるので出ない
+        other_top = Task.objects.create(owner=self.me, title="卒業研究")
+        Task.objects.create(owner=self.me, title="文献調査", parent=other_top)
+        labels = self.choices(self.client.get(reverse("task_update", args=[self.subject.pk])))
+        self.assertEqual(labels, ["なし（一番上のタスク）", "国家試験", "卒業研究"])
+
+    def test_move_task_to_another_parent(self):
+        other_top = Task.objects.create(owner=self.me, title="卒業研究")
+        self.client.post(
+            reverse("task_update", args=[self.chapter.pk]),
+            {"title": "第1章", "parent": other_top.pk, "importance": 2, "category": "exam"},
+        )
+        self.chapter.refresh_from_db()
+        self.assertEqual(self.chapter.parent, other_top)
+
+    def test_add_child_link_inside_card(self):
+        response = self.client.get(reverse("home"))
+        # 1段目・2段目の中には「＋ 子タスクを追加」があり、3段目の下にはない
+        self.assertContains(response, reverse("task_create_child", args=[self.exam.pk]))
+        self.assertContains(response, reverse("task_create_child", args=[self.subject.pk]))
+        self.assertNotContains(response, reverse("task_create_child", args=[self.chapter.pk]))
 
 class TaskModelTests(TestCase):
     def setUp(self):

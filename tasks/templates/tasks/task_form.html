@@ -11,9 +11,6 @@
   <div class="card bg-base-100 shadow-sm">
     <div class="card-body">
       <h1 class="card-title text-xl">{{ page_title }}</h1>
-      {% if parent %}
-        <p class="text-sm text-base-content/70">親タスク：{{ parent.title }}</p>
-      {% endif %}
       {% if not object %}
         <p class="text-sm text-base-content/60">タイトルだけでも登録できます．</p>
       {% endif %}

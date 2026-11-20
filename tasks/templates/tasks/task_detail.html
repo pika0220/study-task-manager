@@ -68,7 +68,7 @@
   {% if task.children.all %}
     <div class="flex flex-col gap-3">
       {% for child in task.children.all %}
-        {% include "tasks/_task_card.html" with task=child %}
+        {% include "tasks/_task_card.html" with task=child card_level=child_level %}
       {% endfor %}
     </div>
   {% elif can_add_child %}
