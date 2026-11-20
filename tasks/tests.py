@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Task
+from .models import Source, Task
 
 
 class HomeViewTests(TestCase):
@@ -297,7 +297,7 @@ class CardChildrenTests(TestCase):
             sub = Task.objects.create(owner=self.me, title=f"科目{i}", parent=exam)
             Task.objects.create(owner=self.me, title=f"章{i}", parent=sub)
         self.client.get(reverse("home"))  # 1回目はセッションなどの準備があるので数えない
-        with self.assertNumQueries(6):
+        with self.assertNumQueries(7):  # 出どころもまとめて読むので1回増えた（子タスクの数では増えない）
             self.client.get(reverse("home"))
 
 
@@ -467,6 +467,80 @@ class CategoryTests(TestCase):
         response = self.client.get(reverse("category_list"))
         self.assertContains(response, 'value="実習"')
         self.assertContains(response, "タスク 1件")
+
+
+class SourceTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.task = Task.objects.create(owner=self.me, title="実習記録")
+        self.client.force_login(self.me)
+        self.url = reverse("source_create", args=[self.task.pk])
+
+    def test_add_source_with_link(self):
+        response = self.client.post(
+            self.url, {"kind": "classroom", "url": "https://classroom.example.com/c/123", "memo": ""}, follow=True
+        )
+        self.assertRedirects(response, reverse("task_detail", args=[self.task.pk]))
+        source = self.task.sources.get()
+        self.assertEqual(source.kind, "classroom")
+        # 別のタブで開き、開いた先から操作されない設定が付いている
+        self.assertContains(response, 'href="https://classroom.example.com/c/123" target="_blank" rel="noopener noreferrer"')
+
+    def test_form_explains_link_or_memo(self):
+        response = self.client.get(reverse("task_detail", args=[self.task.pk]))
+        self.assertContains(response, "リンクかメモの，どちらか1つ以上を入れてください")
+        self.assertNotContains(response, "なくてもよい）</legend>")
+
+    def test_add_source_with_memo_only(self):
+        self.client.post(self.url, {"kind": "paper", "url": "", "memo": "3限の配布プリント"})
+        self.assertEqual(self.task.sources.get().memo, "3限の配布プリント")
+
+    def test_link_without_scheme_becomes_https(self):
+        self.client.post(self.url, {"kind": "slide", "url": "example.com/slide", "memo": ""})
+        self.assertEqual(self.task.sources.get().url, "https://example.com/slide")
+
+    def test_empty_source_is_rejected(self):
+        response = self.client.post(self.url, {"kind": "paper", "url": "", "memo": "  "}, follow=True)
+        self.assertFalse(Source.objects.exists())
+        self.assertContains(response, "リンクかメモのどちらかを入れてください")
+
+    def test_dangerous_link_is_rejected(self):
+        for bad in ("javascript:alert(1)", "ftp://example.com/file"):
+            self.client.post(self.url, {"kind": "other", "url": bad, "memo": "x"})
+        self.assertFalse(Source.objects.exists())
+
+    def test_cannot_add_to_other_users_task(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        response = self.client.post(reverse("source_create", args=[others.pk]), {"kind": "paper", "memo": "x"})
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Source.objects.exists())
+
+    def test_delete_source(self):
+        source = Source.objects.create(task=self.task, kind="paper", memo="プリント")
+        response = self.client.post(reverse("source_delete", args=[source.pk]))
+        self.assertRedirects(response, reverse("task_detail", args=[self.task.pk]))
+        self.assertFalse(Source.objects.exists())
+
+    def test_cannot_delete_other_users_source(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        source = Source.objects.create(task=others, kind="paper", memo="プリント")
+        self.assertEqual(self.client.post(reverse("source_delete", args=[source.pk])).status_code, 404)
+        self.assertTrue(Source.objects.filter(pk=source.pk).exists())
+
+    def test_get_is_not_allowed(self):
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+
+    def test_card_shows_clip_count(self):
+        Source.objects.create(task=self.task, kind="paper", memo="プリント")
+        Source.objects.create(task=self.task, kind="slack", memo="お知らせ")
+        self.assertContains(self.client.get(reverse("home")), "📎 2")
+
+    def test_sources_are_deleted_with_task(self):
+        Source.objects.create(task=self.task, kind="paper", memo="プリント")
+        self.task.delete()
+        self.assertFalse(Source.objects.exists())
 
 class TaskModelTests(TestCase):
     def setUp(self):
