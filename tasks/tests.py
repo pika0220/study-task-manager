@@ -1,10 +1,16 @@
+import io
+import shutil
+import tempfile
 from datetime import datetime, timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from PIL import Image
+from pathlib import Path
 
 from .models import Source, Task
 
@@ -297,7 +303,7 @@ class CardChildrenTests(TestCase):
             sub = Task.objects.create(owner=self.me, title=f"科目{i}", parent=exam)
             Task.objects.create(owner=self.me, title=f"章{i}", parent=sub)
         self.client.get(reverse("home"))  # 1回目はセッションなどの準備があるので数えない
-        with self.assertNumQueries(7):  # 出どころもまとめて読むので1回増えた（子タスクの数では増えない）
+        with self.assertNumQueries(7):  # 資料もまとめて読むので1回増えた（子タスクの数では増えない）
             self.client.get(reverse("home"))
 
 
@@ -490,7 +496,7 @@ class SourceTests(TestCase):
 
     def test_form_explains_link_or_memo(self):
         response = self.client.get(reverse("task_detail", args=[self.task.pk]))
-        self.assertContains(response, "リンクかメモの，どちらか1つ以上を入れてください")
+        self.assertContains(response, "リンク・メモ・写真の，どれか1つ以上を入れてください")
         self.assertNotContains(response, "なくてもよい）</legend>")
 
     def test_add_source_with_memo_only(self):
@@ -504,7 +510,7 @@ class SourceTests(TestCase):
     def test_empty_source_is_rejected(self):
         response = self.client.post(self.url, {"kind": "paper", "url": "", "memo": "  "}, follow=True)
         self.assertFalse(Source.objects.exists())
-        self.assertContains(response, "リンクかメモのどちらかを入れてください")
+        self.assertContains(response, "リンク・メモ・写真のどれか1つ以上を入れてください")
 
     def test_dangerous_link_is_rejected(self):
         for bad in ("javascript:alert(1)", "ftp://example.com/file"):
@@ -541,6 +547,134 @@ class SourceTests(TestCase):
         Source.objects.create(task=self.task, kind="paper", memo="プリント")
         self.task.delete()
         self.assertFalse(Source.objects.exists())
+
+
+TEMP_MEDIA = tempfile.mkdtemp()  # テストでは写真を一時フォルダに保存し、終わったら消す
+
+
+def make_image(fmt="JPEG", size=(3000, 1500), exif=None, name=None):
+    buffer = io.BytesIO()
+    image = Image.new("RGB", size, (200, 30, 30))
+    kwargs = {"exif": exif} if exif is not None else {}
+    image.save(buffer, format=fmt, **kwargs)
+    ext = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif"}[fmt]
+    return SimpleUploadedFile(name or f"photo.{ext}", buffer.getvalue(), content_type=f"image/{ext}")
+
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA)
+class SourcePhotoTests(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(TEMP_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.task = Task.objects.create(owner=self.me, title="実習記録")
+        self.client.force_login(self.me)
+        self.url = reverse("source_create", args=[self.task.pk])
+
+    def post_photo(self, upload, **extra):
+        data = {"kind": "paper", "url": "", "memo": "", "photo": upload}
+        data.update(extra)
+        return self.client.post(self.url, data, follow=True)
+
+    def test_upload_photo_only(self):
+        response = self.post_photo(make_image())
+        self.assertContains(response, "資料を追加しました")
+        source = self.task.sources.get()
+        # ランダムな名前のJPEGとして、持ち主のフォルダに保存される
+        self.assertRegex(source.photo.name, rf"^source_photos/{self.me.pk}/[0-9a-f]{{32}}\.jpg$")
+        with Image.open(source.photo.path) as saved:
+            self.assertEqual(saved.format, "JPEG")
+            self.assertEqual(max(saved.size), 2000)  # 長い辺は2000pxまで縮める
+        self.assertContains(response, reverse("source_photo", args=[source.pk]))
+
+    def test_exif_is_removed(self):
+        exif = Image.Exif()
+        exif[0x010F] = "TestCameraMaker"  # 機種の情報
+        exif[0x0132] = "2026:11:20 10:00:00"  # 撮影日時
+        self.post_photo(make_image(exif=exif))
+        with Image.open(self.task.sources.get().photo.path) as saved:
+            self.assertEqual(len(saved.getexif()), 0)
+
+    def test_png_and_webp_are_accepted(self):
+        self.post_photo(make_image("PNG", size=(400, 300)))
+        self.post_photo(make_image("WEBP", size=(400, 300)))
+        self.assertEqual(self.task.sources.count(), 2)
+
+    def test_fake_image_is_rejected(self):
+        fake = SimpleUploadedFile("evil.jpg", b"<script>alert(1)</script>", content_type="image/jpeg")
+        response = self.post_photo(fake)
+        self.assertContains(response, "画像として読み込めないファイルです")
+        self.assertFalse(Source.objects.exists())
+
+    def test_other_format_is_rejected(self):
+        response = self.post_photo(make_image("GIF", size=(50, 50)))
+        self.assertContains(response, "JPEG・PNG・WebPの写真だけをのせられます")
+        self.assertFalse(Source.objects.exists())
+
+    def test_too_large_file_is_rejected(self):
+        big = SimpleUploadedFile("big.jpg", b"0" * (10 * 1024 * 1024 + 1), content_type="image/jpeg")
+        response = self.post_photo(big)
+        self.assertContains(response, "写真は10MBまでにしてください")
+        self.assertFalse(Source.objects.exists())
+
+    def test_too_many_pixels_is_rejected(self):
+        # ファイルは小さいが、開くと巨大になる画像（解凍爆弾）
+        buffer = io.BytesIO()
+        Image.new("1", (8000, 7000)).save(buffer, format="PNG")
+        bomb = SimpleUploadedFile("bomb.png", buffer.getvalue(), content_type="image/png")
+        response = self.post_photo(bomb)
+        self.assertContains(response, "写真の画素数が大きすぎます")
+        self.assertFalse(Source.objects.exists())
+
+    def test_photo_is_visible_only_to_owner(self):
+        self.post_photo(make_image(size=(100, 100)))
+        source = self.task.sources.get()
+        url = reverse("source_photo", args=[source.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/jpeg")
+        self.assertIn("private", response["Cache-Control"])
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        # ほかの人は見られない
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        # ログインしていない人はログイン画面へ
+        self.client.logout()
+        self.assertEqual(self.client.get(url).status_code, 302)
+
+    def test_photo_file_is_deleted_with_source_and_task(self):
+        self.post_photo(make_image(size=(100, 100)))
+        source = self.task.sources.get()
+        path = source.photo.path
+        self.client.post(reverse("source_delete", args=[source.pk]))
+        self.assertFalse(Path(path).exists())
+        # タスクを消したときも、写真のファイルが残らない
+        self.post_photo(make_image(size=(100, 100)))
+        path = self.task.sources.get().photo.path
+        self.task.delete()
+        self.assertFalse(Path(path).exists())
+
+    def test_photo_limit_per_user(self):
+        # 上限を一時的に1枚にして確かめる
+        original = Source.MAX_PHOTOS_PER_USER
+        Source.MAX_PHOTOS_PER_USER = 1
+        try:
+            self.post_photo(make_image(size=(100, 100)))
+            response = self.post_photo(make_image(size=(100, 100)))
+        finally:
+            Source.MAX_PHOTOS_PER_USER = original
+        self.assertContains(response, "写真は1人1枚までです")
+        self.assertEqual(self.task.sources.count(), 1)
+
+    def test_form_has_privacy_notice_and_multipart(self):
+        response = self.client.get(reverse("task_detail", args=[self.task.pk]))
+        self.assertContains(response, "個人情報（患者さん・利用者さんの名前など）が写っている写真はのせないでください")
+        self.assertContains(response, 'enctype="multipart/form-data"')
 
 class TaskModelTests(TestCase):
     def setUp(self):

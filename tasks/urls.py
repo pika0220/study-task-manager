@@ -11,9 +11,10 @@ urlpatterns = [
     path("tasks/<int:pk>/toggle/", views.task_toggle, name="task_toggle"),
     # 5番のタスクの下に子タスクを作る：/tasks/5/children/new/
     path("tasks/<int:parent_pk>/children/new/", views.TaskCreateView.as_view(), name="task_create_child"),
-    # 指示の出どころ
+    # 資料（プログラムの中の名前は source）
     path("tasks/<int:pk>/sources/new/", views.source_create, name="source_create"),
     path("sources/<int:pk>/delete/", views.source_delete, name="source_delete"),
+    path("sources/<int:pk>/photo/", views.source_photo, name="source_photo"),
     # 分類の管理
     path("categories/", views.category_list, name="category_list"),
     path("categories/new/", views.category_create, name="category_create"),

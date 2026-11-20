@@ -5,6 +5,7 @@ from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.urls import reverse
 from django.utils.html import format_html
 
+from .images import sanitize_photo
 from .models import Category, Source, Task
 
 NEW_CATEGORY = "__new__"  # 分類の選択肢「＋ 新しい分類…」の値
@@ -169,7 +170,7 @@ class TaskForm(forms.ModelForm):
 
 
 class SourceForm(forms.ModelForm):
-    """指示の出どころを足すフォーム。詳細画面の中に小さく置く。"""
+    """資料を足すフォーム。詳細画面の中に小さく置く。使うときは owner=ログイン中のユーザー を渡す。"""
 
     # assume_scheme="https"：「example.com」のように http を省いて書かれたら https:// を補う
     url = forms.URLField(
@@ -180,11 +181,35 @@ class SourceForm(forms.ModelForm):
         widget=forms.URLInput(attrs={"class": "input w-full", "placeholder": "https://..."}),
     )
 
+    # 写真：受け取ったファイルはそのまま使わず、clean_photo で確かめて描き直す
+    photo = forms.FileField(
+        label="写真",
+        required=False,
+        widget=forms.FileInput(
+            attrs={"class": "file-input w-full", "accept": "image/jpeg,image/png,image/webp"}
+        ),
+        help_text="個人情報（患者さん・利用者さんの名前など）が写っている写真はのせないでください．撮影場所などの情報は自動で消します．",
+    )
+
     class Meta:
         model = Source
-        fields = ["kind", "url", "memo"]
+        fields = ["kind", "url", "memo", "photo"]
         labels = {"memo": "メモ"}
         widgets = {
             "kind": forms.Select(attrs={"class": "select w-full"}),
             "memo": forms.TextInput(attrs={"class": "input w-full", "placeholder": "例：3限の配布プリント"}),
         }
+
+    def __init__(self, *args, owner=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.owner = owner
+
+    def clean_photo(self):
+        upload = self.cleaned_data.get("photo")
+        if not upload:
+            return None
+        if self.owner is not None:
+            count = Source.objects.filter(task__owner=self.owner).exclude(photo="").count()
+            if count >= Source.MAX_PHOTOS_PER_USER:
+                raise ValidationError(f"写真は1人{Source.MAX_PHOTOS_PER_USER}枚までです．使わない写真を消してください．")
+        return sanitize_photo(upload)

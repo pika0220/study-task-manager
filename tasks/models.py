@@ -160,8 +160,19 @@ class Task(models.Model):
         return round(done * 100 / len(children))
 
 
+def source_photo_path(instance, filename):
+    """写真を保存する場所。持ち主ごとのフォルダに、ランダムな名前（filename は images.py で付ける）で置く。"""
+    return f"source_photos/{instance.task.owner_id}/{filename}"
+
+
 class Source(models.Model):
-    """指示の出どころ（F-04）。「この課題の指示はどこにあったか」を記録する。1つのタスクに複数付けられる。"""
+    """資料（F-04）。課題の指示に関係するもの（プリント・スライド・リンク・メモ・写真）を記録する。1つのタスクに複数付けられる。
+
+    画面では「資料」と呼ぶ（最初は「出どころ」という名前だった）。プログラムの中の名前は Source のまま。
+    """
+
+    # 1人あたりの写真の枚数の上限（サーバーの容量を使いすぎないため）
+    MAX_PHOTOS_PER_USER = 100
 
     class Kind(models.TextChoices):
         PAPER = "paper", "紙"
@@ -174,7 +185,7 @@ class Source(models.Model):
 
     task = models.ForeignKey(
         Task,
-        on_delete=models.CASCADE,  # タスクを消したら、その出どころも消す
+        on_delete=models.CASCADE,  # タスクを消したら、その資料も消す
         related_name="sources",
         verbose_name="タスク",
     )
@@ -187,18 +198,20 @@ class Source(models.Model):
         validators=[URLValidator(schemes=["http", "https"])],
     )
     memo = models.CharField("メモ", max_length=200, blank=True)
+    # 写真は誰でも開ける場所には置かず、持ち主だけが見られる画面（source_photo）を通して表示する
+    photo = models.ImageField("写真", upload_to=source_photo_path, blank=True)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
 
     class Meta:
-        verbose_name = "出どころ"
-        verbose_name_plural = "出どころ"
+        verbose_name = "資料"
+        verbose_name_plural = "資料"
         ordering = ["created_at", "id"]  # 足した順に並べる
 
     def __str__(self):
-        return f"{self.get_kind_display()}：{self.memo or self.url}"
+        return f"{self.get_kind_display()}：{self.memo or self.url or '写真'}"
 
     def clean(self):
         super().clean()
-        # 中身のない記録が増えないよう、リンクかメモのどちらかは必ず入れてもらう
-        if not self.url and not self.memo.strip():
-            raise ValidationError("リンクかメモのどちらかを入れてください．")
+        # 中身のない記録が増えないよう、リンク・メモ・写真のどれか1つは必ず入れてもらう
+        if not self.url and not self.memo.strip() and not self.photo:
+            raise ValidationError("リンク・メモ・写真のどれか1つ以上を入れてください．")
