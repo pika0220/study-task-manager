@@ -17,7 +17,23 @@
 
       <form method="post" class="flex flex-col gap-1">
         {% csrf_token %}
-        {% include "partials/form_fields.html" %}
+        {% for error in form.non_field_errors %}
+          <div role="alert" class="alert alert-error mb-2 text-sm">{{ error }}</div>
+        {% endfor %}
+
+        {% include "partials/form_field.html" with field=form.title %}
+
+        <!-- つながり：親子（📁 中の作業）と前後（🔒 終わってから）を、1つの枠にまとめる -->
+        <div class="mt-2 rounded-box border border-base-300 bg-base-200/50 px-3 pb-3">
+          <p class="pt-3 text-sm font-bold">つながり（なくてもよい）</p>
+          {% for field in form.relation_fields %}
+            {% include "partials/form_field.html" with field=field %}
+          {% endfor %}
+        </div>
+
+        {% for field in form.detail_fields %}
+          {% include "partials/form_field.html" with field=field %}
+        {% endfor %}
         <div class="mt-4 flex gap-2">
           <a href="{{ cancel_url }}" class="btn flex-1">やめる</a>
           <button type="submit" class="btn btn-primary flex-1">{{ submit_label }}</button>

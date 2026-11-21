@@ -5,7 +5,7 @@
 {% endcomment %}
 <article class="card border-l-8 bg-base-100 shadow-sm
   {% if task.importance == 3 %}border-error{% elif task.importance == 2 %}border-warning{% else %}border-base-300{% endif %}
-  {% if task.is_done %}opacity-60{% endif %}">
+  {% if task.is_done %}opacity-60{% elif task.is_locked %}opacity-75{% endif %}">
   <div class="card-body flex-row items-start gap-3 p-4">
     <!-- 完了・未完了を切り替えるボタン。データを変えるので POST で送る -->
     <form method="post" action="{% url 'task_toggle' task.pk %}" class="shrink-0">
@@ -50,6 +50,11 @@
           {% if n %}<span class="text-base-content/70" title="資料 {{ n }}件">📎 {{ n }}</span>{% endif %}
         {% endwith %}
       </div>
+
+      <!-- 先にやることが終わっていなければ、🔒 と、何が終わればよいかを出す -->
+      {% if task.is_locked and not task.is_done %}
+        <div class="text-sm text-base-content/70">🔒 「{{ task.prerequisite.title }}」が終わってから</div>
+      {% endif %}
 
       <!-- 子タスクがあれば「▶ 子タスク○件」を出し、押すとカードの中に開く -->
       <!-- level：このカードのタスクが何段目か（ホームは1段目。詳細画面では card_level で渡す） -->

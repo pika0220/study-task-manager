@@ -74,6 +74,16 @@ class Task(models.Model):
         related_name="children",
         verbose_name="親タスク",
     )
+    # 前後のつながり（F-08）：このタスクの前に終わらせておくタスク。1つだけ選べる。
+    # 親子（中の作業）とは別のつながり。先にやるタスクを消したら、つながりだけ外れる（SET_NULL）
+    prerequisite = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dependents",  # 逆向き：このタスクが終わると進められるタスク
+        verbose_name="先にやること",
+    )
     is_done = models.BooleanField("完了", default=False)
     done_at = models.DateTimeField("完了した日時", null=True, blank=True)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
@@ -106,6 +116,19 @@ class Task(models.Model):
     def clean(self):
         """保存する前のチェック。管理画面や入力フォームから自動で呼ばれる。"""
         super().clean()
+        self._clean_parent()
+        self._clean_prerequisite()
+
+    def ancestors(self):
+        """自分の親、親の親…を順に返す。"""
+        result = []
+        node = self.parent
+        while node is not None:
+            result.append(node)
+            node = node.parent
+        return result
+
+    def _clean_parent(self):
         if self.parent is None:
             return
 
@@ -123,6 +146,35 @@ class Task(models.Model):
             raise ValidationError(
                 {"parent": f"タスクの入れ子は{self.MAX_DEPTH}段までです。"}
             )
+
+    def _clean_prerequisite(self):
+        prereq = self.prerequisite
+        if prereq is None:
+            return
+
+        if self.owner_id and prereq.owner_id != self.owner_id:
+            raise ValidationError({"prerequisite": "他の人のタスクは選べません。"})
+        if self.pk is not None and prereq.pk == self.pk:
+            raise ValidationError({"prerequisite": "自分自身は選べません。"})
+
+        # 親子とは別のつながりなので、自分の親や子孫は選べない
+        if prereq.pk in {a.pk for a in self.ancestors()}:
+            raise ValidationError({"prerequisite": "自分の親タスクは選べません。"})
+        if self.pk is not None and self.pk in {a.pk for a in prereq.ancestors()}:
+            raise ValidationError({"prerequisite": "自分の子タスクは選べません。"})
+
+        # 先にやることを順にたどって自分に戻ってきたら、前後が輪になっている
+        node, seen = prereq, set()
+        while node is not None and node.pk not in seen:
+            if self.pk is not None and node.pk == self.pk:
+                raise ValidationError({"prerequisite": "前後のつながりが輪になってしまいます。"})
+            seen.add(node.pk)
+            node = node.prerequisite
+
+    @property
+    def is_locked(self):
+        """先にやることが終わっていないとき True（まだ取りかかれない）。"""
+        return self.prerequisite_id is not None and not self.prerequisite.is_done
 
     def save(self, *args, **kwargs):
         # 完了にしたら日時を記録し、未完了に戻したら消す

@@ -10,15 +10,5 @@
 {% endif %}
 
 {% for field in form %}
-  <!-- id="field-欄の名前"：画面のJavaScriptから、この欄を見せる・隠すときに使う -->
-  <fieldset class="fieldset" id="field-{{ field.name }}">
-    <legend class="fieldset-legend">{{ field.label }}</legend>
-    {{ field }}
-    {% for error in field.errors %}
-      <p class="text-sm text-error">{{ error }}</p>
-    {% endfor %}
-    {% if field.help_text %}
-      <div class="text-xs text-base-content/60">{{ field.help_text|safe }}</div>
-    {% endif %}
-  </fieldset>
+  {% include "partials/form_field.html" with field=field %}
 {% endfor %}
