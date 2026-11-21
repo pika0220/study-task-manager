@@ -325,7 +325,7 @@ class ParentSelectTests(TestCase):
     def test_create_form_lists_parents_as_tree(self):
         labels = self.choices(self.client.get(reverse("task_create")))
         # 親の下に子が字下げされて並ぶ。3段目・完了・他の人のタスクは出ない
-        self.assertEqual(labels, ["なし（一番上のタスク）", "国家試験", "　└ 薬理学"])
+        self.assertEqual(labels, ["なし（ほかのタスクの中に入れない）", "国家試験", "　└ 薬理学"])
 
     def test_create_child_from_menu(self):
         response = self.client.post(
@@ -348,7 +348,7 @@ class ParentSelectTests(TestCase):
         other_top = Task.objects.create(owner=self.me, title="卒業研究")
         Task.objects.create(owner=self.me, title="文献調査", parent=other_top)
         labels = self.choices(self.client.get(reverse("task_update", args=[self.subject.pk])))
-        self.assertEqual(labels, ["なし（一番上のタスク）", "国家試験", "卒業研究"])
+        self.assertEqual(labels, ["なし（ほかのタスクの中に入れない）", "国家試験", "卒業研究"])
 
     def test_move_task_to_another_parent(self):
         other_top = Task.objects.create(owner=self.me, title="卒業研究")
@@ -675,6 +675,122 @@ class SourcePhotoTests(TestCase):
         response = self.client.get(reverse("task_detail", args=[self.task.pk]))
         self.assertContains(response, "個人情報（患者さん・利用者さんの名前など）が写っている写真はのせないでください")
         self.assertContains(response, 'enctype="multipart/form-data"')
+
+
+class PrerequisiteTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.research = Task.objects.create(owner=self.me, title="卒業研究")
+        self.survey = Task.objects.create(owner=self.me, title="文献調査", parent=self.research)
+        self.outline = Task.objects.create(owner=self.me, title="構成を考える", parent=self.research)
+        self.client.force_login(self.me)
+
+    def labels(self, url):
+        return [label for value, label in self.client.get(url).context["form"].fields["prerequisite"].choices]
+
+    def test_set_prerequisite_from_edit(self):
+        self.client.post(
+            reverse("task_update", args=[self.outline.pk]),
+            {"title": "構成を考える", "parent": self.research.pk, "prerequisite": self.survey.pk, "importance": 2},
+        )
+        self.outline.refresh_from_db()
+        self.assertEqual(self.outline.prerequisite, self.survey)
+        self.assertTrue(self.outline.is_locked)
+
+    def test_choices_show_path_and_hide_invalid(self):
+        Task.objects.create(owner=self.me, title="済んだタスク", is_done=True)
+        Task.objects.create(owner=self.other, title="他の人のタスク")
+        labels = self.labels(reverse("task_update", args=[self.outline.pk]))
+        # 親（卒業研究）・自分・完了・他の人のタスクは出ない。道すじ付きの見出しで出る
+        self.assertEqual(labels, ["なし", "卒業研究 › 文献調査"])
+
+    def test_choices_hide_tasks_that_would_make_a_loop(self):
+        self.outline.prerequisite = self.survey
+        self.outline.save()
+        # 文献調査を編集するとき、文献調査のあとにやる「構成を考える」は選べない（輪になる）
+        labels = self.labels(reverse("task_update", args=[self.survey.pk]))
+        self.assertNotIn("卒業研究 › 構成を考える", labels)
+
+    def test_model_rejects_loop_self_parent_and_child(self):
+        self.outline.prerequisite = self.survey
+        self.outline.save()
+        cases = [
+            (self.survey, self.outline, "輪になってしまいます"),
+            (self.survey, self.survey, "自分自身は選べません"),
+            (self.survey, self.research, "自分の親タスクは選べません"),
+            (self.research, self.survey, "自分の子タスクは選べません"),
+        ]
+        for task, prereq, message in cases:
+            task.prerequisite = prereq
+            with self.assertRaises(ValidationError) as ctx:
+                task.full_clean()
+            self.assertIn(message, " ".join(ctx.exception.message_dict["prerequisite"]))
+            task.refresh_from_db()
+
+    def test_cannot_choose_other_users_task(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        response = self.client.post(
+            reverse("task_create"), {"title": "なりすまし", "prerequisite": others.pk, "importance": 2}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Task.objects.filter(title="なりすまし").exists())
+
+    def test_locked_card_and_unlock_after_done(self):
+        report = Task.objects.create(owner=self.me, title="レポートを書く", prerequisite=self.research)
+        home = self.client.get(reverse("home"))
+        self.assertContains(home, "🔒 「卒業研究」が終わってから")
+        # 先にやることを完了にすると、🔒 が消える
+        self.client.post(reverse("task_toggle", args=[self.research.pk]))
+        home = self.client.get(reverse("home"))
+        self.assertNotContains(home, "🔒 「卒業研究」が終わってから")
+        report.refresh_from_db()
+        self.assertFalse(report.is_locked)
+
+    def test_home_puts_available_tasks_first(self):
+        Task.objects.create(owner=self.me, title="高・待ち", importance=3, prerequisite=self.research)
+        Task.objects.create(owner=self.me, title="低・すぐできる", importance=1)
+        titles = [t.title for t in self.client.get(reverse("home")).context["open_tasks"]]
+        # 重要度が高くても、🔒 のタスクはすぐできるタスクより下
+        self.assertLess(titles.index("低・すぐできる"), titles.index("高・待ち"))
+
+    def test_deleting_prerequisite_keeps_task(self):
+        report = Task.objects.create(owner=self.me, title="レポートを書く", prerequisite=self.survey)
+        self.survey.delete()
+        report.refresh_from_db()
+        self.assertIsNone(report.prerequisite)
+
+    def test_form_groups_relations_with_question_labels(self):
+        response = self.client.get(reverse("task_create"))
+        html = response.content.decode()
+        self.assertIn("つながり（なくてもよい）", html)
+        self.assertIn("📁 どのタスクの中の作業？", html)
+        self.assertIn("🔒 何が終わってから取りかかる？", html)
+        # 2つの質問は「つながり」の枠の中に並び、締切の欄より前にある
+        self.assertLess(html.index("つながり（なくてもよい）"), html.index("📁 どのタスクの中の作業？"))
+        self.assertLess(html.index("🔒 何が終わってから取りかかる？"), html.index('id="field-due_at"'))
+
+    def test_detail_shows_relation_diagram(self):
+        self.outline.prerequisite = self.survey
+        self.outline.save()
+        response = self.client.get(reverse("task_detail", args=[self.outline.pk]))
+        self.assertContains(response, "「<a href=\"%s\" class=\"link\">卒業研究</a>」の中の作業" % reverse("task_detail", args=[self.research.pk]), html=False)
+        self.assertContains(response, "このタスク")
+        self.assertContains(response, "🔒 まだ")
+        # つながりがないタスクには案内を出す
+        response = self.client.get(reverse("task_detail", args=[self.research.pk]))
+        self.assertContains(response, "前後のつながりはまだありません")
+        self.assertContains(response, "このタスクの中の作業：子タスク2件")
+
+    def test_detail_shows_prerequisite_and_next(self):
+        self.outline.prerequisite = self.survey
+        self.outline.save()
+        response = self.client.get(reverse("task_detail", args=[self.survey.pk]))
+        self.assertContains(response, "次にやること")
+        self.assertContains(response, "構成を考える")
+        response = self.client.get(reverse("task_detail", args=[self.outline.pk]))
+        self.assertContains(response, "🔒 まだ")
 
 class TaskModelTests(TestCase):
     def setUp(self):

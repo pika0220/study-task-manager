@@ -1,0 +1,15 @@
+{% comment %}
+  入力欄1つ分の部品。使い方：{% include "partials/form_field.html" with field=form.title %}
+  form_fields.html（全部の欄を並べる部品）も、中でこの部品を使っている。
+{% endcomment %}
+<!-- id="field-欄の名前"：画面のJavaScriptから、この欄を見せる・隠すときに使う -->
+<fieldset class="fieldset" id="field-{{ field.name }}">
+  <legend class="fieldset-legend">{{ field.label }}</legend>
+  {{ field }}
+  {% for error in field.errors %}
+    <p class="text-sm text-error">{{ error }}</p>
+  {% endfor %}
+  {% if field.help_text %}
+    <div class="text-xs text-base-content/60">{{ field.help_text|safe }}</div>
+  {% endif %}
+</fieldset>

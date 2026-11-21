@@ -22,11 +22,19 @@ def home(request):
     # select_related("category")：カードに出す分類の名前も、同じ問い合わせで一緒に読む
     tasks = (
         request.user.tasks.filter(parent=None)
-        .select_related("category")
-        .prefetch_related("children__children__children", "sources")
+        .select_related("category", "prerequisite")
+        .prefetch_related(
+            "children__children__children",
+            "children__prerequisite",
+            "children__children__prerequisite",
+            "sources",
+        )
     )
     # 並び順はモデルの Meta.ordering（未完了 → 重要度が高い → 締切が近い）のまま
     open_tasks = [task for task in tasks if not task.is_done]
+    # 今すぐ取りかかれるタスクを上に、🔒（先にやることが終わっていない）を下に。
+    # sorted は「同じ順位のものは元の順番を保つ」ので、それぞれの中は重要度 → 締切の順のまま
+    open_tasks = sorted(open_tasks, key=lambda task: task.is_locked)
     done_tasks = [task for task in tasks if task.is_done]
     # 見出しの「未完了 ○件」は、並んでいるカードの数とそろえる（子タスクは数えない）
     open_count = len(open_tasks)
@@ -58,8 +66,16 @@ class TaskDetailView(OwnTaskMixin, DetailView):
         return (
             super()
             .get_queryset()
-            .select_related("parent", "category")
-            .prefetch_related("children__children__children", "children__category", "children__sources", "sources")
+            .select_related("parent", "category", "prerequisite")
+            .prefetch_related(
+                "children__children__children",
+                "children__category",
+                "children__sources",
+                "children__prerequisite",
+                "children__children__prerequisite",
+                "sources",
+                "dependents",
+            )
         )
 
     def get_context_data(self, **kwargs):

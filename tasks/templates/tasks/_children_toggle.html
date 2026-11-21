@@ -12,7 +12,7 @@
         <!-- 開いているときは ▶ を90度回して ▼ に見せる（自分のすぐ外の details が開いているときだけ回す。孫の▶は別に回る） -->
         <span class="inline-block w-4 text-center transition-transform [details[open]>summary>&]:rotate-90" aria-hidden="true">▶</span>
         <progress class="progress progress-primary w-full" value="{{ parent.progress }}" max="100"></progress>
-        <span class="shrink-0 text-xs">子タスク {{ total }}件・{{ parent.progress }}%</span>
+        <span class="shrink-0 text-xs">📁 子タスク {{ total }}件・{{ parent.progress }}%</span>
       </summary>
       <ul class="mt-1 ml-2 flex flex-col border-l-2 border-base-300 pl-3">
         {% for child in parent.children.all %}

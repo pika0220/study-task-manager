@@ -69,6 +69,58 @@ def parent_options(user, editing=None):
     return result
 
 
+def prerequisite_options(user, editing=None):
+    """「先にやること」として選べるタスクを、木の形の順に (タスク, 見出し) で返す。
+
+    - 自分の、未完了のタスク（今選んでいるものは、完了していても残す）
+    - 編集中は、自分自身・自分の親や子孫・前後が輪になるもの（自分のあとにやるタスク）を出さない
+    見出しは「国家試験 › 薬理学」のように親からの道すじにして、同じ名前のタスクを見分けやすくする。
+    """
+    tasks = list(user.tasks.all())
+    by_id = {task.pk: task for task in tasks}
+    children = defaultdict(list)
+    dependents = defaultdict(list)  # 先にやるタスクの番号 → それを待っているタスク
+    for task in tasks:
+        children[task.parent_id].append(task)
+        if task.prerequisite_id:
+            dependents[task.prerequisite_id].append(task)
+
+    blocked = set()
+    if editing is not None and editing.pk is not None:
+        # 自分と子孫
+        stack = [editing.pk]
+        while stack:
+            pk = stack.pop()
+            blocked.add(pk)
+            stack.extend(child.pk for child in children[pk])
+        # 親・親の親…
+        node = by_id.get(editing.parent_id)
+        while node is not None:
+            blocked.add(node.pk)
+            node = by_id.get(node.parent_id)
+        # 自分のあとにやるタスク（選ぶと輪になる）
+        stack = [editing.pk]
+        while stack:
+            pk = stack.pop()
+            for task in dependents[pk]:
+                if task.pk not in blocked:
+                    blocked.add(task.pk)
+                    stack.append(task.pk)
+
+    current_id = editing.prerequisite_id if editing is not None else None
+    result = []
+
+    def walk(parent_id, path):
+        for task in children[parent_id]:
+            label = " › ".join(path + [task.title])
+            if task.pk not in blocked and (not task.is_done or task.pk == current_id):
+                result.append((task, label))
+            walk(task.pk, path + [task.title])
+
+    walk(None, [])
+    return result
+
+
 class TaskForm(forms.ModelForm):
     """タスクの登録・編集に使うフォーム。
 
@@ -79,14 +131,24 @@ class TaskForm(forms.ModelForm):
 
     class Meta:
         model = Task
-        fields = ["title", "parent", "due_at", "importance", "category", "memo"]
-        labels = {"parent": "親タスク（なくてもよい）"}
+        fields = ["title", "parent", "prerequisite", "due_at", "importance", "category", "memo"]
+        # 用語（親タスク・先にやること）ではなく、使う人が自分に問いかける形にする。
+        # アイコンは画面全体でそろえる：📁＝中の作業（親子）、🔒＝終わってから（前後）
+        labels = {
+            "parent": "📁 どのタスクの中の作業？",
+            "prerequisite": "🔒 何が終わってから取りかかる？",
+        }
+        help_texts = {
+            "parent": "例：「卒業研究」の中の「文献調査」．選ぶと，そのタスクの子タスクになります．",
+            "prerequisite": "例：「文献調査」が終わってから「構成を考える」．終わるまでカードに🔒が付きます．",
+        }
         field_classes = {"category": CategoryChoiceField}
         widgets = {
             "title": forms.TextInput(
                 attrs={"class": "input w-full", "placeholder": "例：実習記録を書く", "autofocus": True}
             ),
             "parent": forms.Select(attrs={"class": "select w-full"}),
+            "prerequisite": forms.Select(attrs={"class": "select w-full"}),
             # type="datetime-local"：スマホでは日付と時刻を選ぶ画面が開く
             "due_at": forms.DateTimeInput(
                 attrs={"class": "input w-full", "type": "datetime-local"},
@@ -105,7 +167,7 @@ class TaskForm(forms.ModelForm):
         widget=forms.TextInput(attrs={"class": "input w-full", "placeholder": "例：部活"}),
     )
 
-    field_order = ["title", "parent", "due_at", "importance", "category", "new_category_name", "memo"]
+    field_order = ["title", "parent", "prerequisite", "due_at", "importance", "category", "new_category_name", "memo"]
 
     def __init__(self, *args, user, **kwargs):
         super().__init__(*args, **kwargs)
@@ -129,10 +191,27 @@ class TaskForm(forms.ModelForm):
         # 選べるのは options に入ったタスクだけ（ほかの番号を送られても「正しくない選択」になる）
         field.queryset = Task.objects.filter(pk__in=[task.pk for task, _ in options])
         # 親の下に子を字下げして並べる。全角スペースは、ブラウザで詰められずに残る
-        field.choices = [("", "なし（一番上のタスク）")] + [
+        field.choices = [("", "なし（ほかのタスクの中に入れない）")] + [
             (task.pk, "　" * (depth - 1) + ("└ " if depth > 1 else "") + task.title)
             for task, depth in options
         ]
+
+        # 先にやること：同じように、選べるタスクだけに絞る
+        pre_options = prerequisite_options(user, editing=self.instance)
+        pre = self.fields["prerequisite"]
+        pre.queryset = Task.objects.filter(pk__in=[task.pk for task, _ in pre_options])
+        pre.choices = [("", "なし")] + [(task.pk, label) for task, label in pre_options]
+
+    # 画面で「つながり」の枠にまとめて出す欄
+    RELATION_FIELDS = ("parent", "prerequisite")
+
+    def relation_fields(self):
+        """つながりの欄（親子・前後）だけを返す。"""
+        return [self[name] for name in self.RELATION_FIELDS]
+
+    def detail_fields(self):
+        """タイトルとつながり以外の欄（締切・重要度・分類・メモなど）を返す。"""
+        return [field for field in self if field.name not in self.RELATION_FIELDS + ("title",)]
 
     def clean(self):
         cleaned = super().clean()
