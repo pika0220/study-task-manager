@@ -8,6 +8,10 @@
     <span class="text-sm text-base-content/70">未完了 <span class="text-lg font-bold text-primary">{{ open_count }}</span> 件</span>
   </div>
 
+  {% if open_tasks %}
+    <p class="mb-3 text-xs text-base-content/60">カードを長押しして別のカードに重ねると，📁 中に入れる・🔒 終わってからやる，でつなげられます．</p>
+  {% endif %}
+
   <!-- 未完了のタスク：重要度が高い順、締切が近い順 -->
   <div class="flex flex-col gap-3">
     {% for task in open_tasks %}
@@ -34,4 +38,6 @@
       </div>
     </details>
   {% endif %}
+
+  {% include "tasks/_link_dialog.html" %}
 {% endblock %}

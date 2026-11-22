@@ -180,4 +180,6 @@
   {% if not can_add_child %}
     <p class="text-sm text-base-content/60">このタスクは3段目なので，これ以上子タスクを付けられません．</p>
   {% endif %}
+
+  {% include "tasks/_link_dialog.html" %}
 {% endblock %}
