@@ -3,7 +3,8 @@
   重要度は「色」と「文字（高・中・低）」の両方で見せる（色だけだと見分けにくい人もいるため）。
   importance の数字：3＝高、2＝中、1＝低
 {% endcomment %}
-<article class="card border-l-8 bg-base-100 shadow-sm
+<!-- data-task-id・data-title：長押しで持ち上げて、別のカードに落とすときに使う（drag_link.js） -->
+<article data-task-id="{{ task.pk }}" data-title="{{ task.title }}" class="card border-l-8 bg-base-100 shadow-sm
   {% if task.importance == 3 %}border-error{% elif task.importance == 2 %}border-warning{% else %}border-base-300{% endif %}
   {% if task.is_done %}opacity-60{% elif task.is_locked %}opacity-75{% endif %}">
   <div class="card-body flex-row items-start gap-3 p-4">

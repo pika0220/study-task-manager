@@ -1,0 +1,50 @@
+{% load static %}
+{% comment %}
+  カードを別のカードに落としたときに出る「つなぎ方」を選ぶ画面（Issue #29）。
+  使い方：ホームや詳細画面に {% include "tasks/_link_dialog.html" %} を1回だけ置く。
+  中身（タスクの名前・押せるボタン）は drag_link.js が入れる。
+{% endcomment %}
+<!-- dialog：HTMLにもともとある「重ねて出す画面」。modal-bottom で、スマホでは下から出てくる -->
+<dialog id="link-dialog" class="modal modal-bottom sm:modal-middle"
+        data-options-url="{% url 'task_link_options' 0 %}"
+        data-link-url="{% url 'task_link' 0 %}">
+  <div class="modal-box">
+    <h3 class="text-lg font-bold">「<span data-source-title></span>」を…</h3>
+    <form method="post" class="link-form mt-4 flex flex-col gap-2">
+      {% csrf_token %}
+      <input type="hidden" name="target" value="">
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+      <button type="submit" name="relation" value="child" class="btn btn-block min-h-12 justify-start">
+        <!-- ボタンの中身を1つの span にまとめる（分かれていると、ボタンの「すき間」の設定で空白が入るため） -->
+        <span>📁 「<span data-target-title></span>」の中に入れる</span>
+      </button>
+      <p class="-mt-1 text-xs text-error" data-reason="child"></p>
+
+      <button type="submit" name="relation" value="after" class="btn btn-block min-h-12 justify-start">
+        <span>🔒 「<span data-target-title></span>」が終わってからやる</span>
+      </button>
+      <p class="-mt-1 text-xs text-error" data-reason="after"></p>
+    </form>
+    <form method="dialog" class="mt-2">
+      <!-- method="dialog"：送らずに画面を閉じるだけ。何も変わらない -->
+      <button class="btn btn-ghost btn-block">やめる</button>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button aria-label="閉じる">close</button></form>
+</dialog>
+
+<style>
+  /* 持ち上げたカード・落とす先・指についてくる影の見た目 */
+  [data-task-id] { -webkit-touch-callout: none; }
+  body.is-dragging { user-select: none; -webkit-user-select: none; }
+  .drag-source { opacity: 0.4; }
+  .drop-target { outline: 3px solid var(--color-primary); outline-offset: 2px; border-radius: 0.75rem; }
+  .drag-ghost {
+    position: fixed; z-index: 50; pointer-events: none; transform: translate(-50%, -120%);
+    padding: 0.5rem 0.75rem; border-radius: 0.75rem; background: var(--color-base-100);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.25); font-weight: bold; font-size: 0.875rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+</style>
+<script src="{% static 'tasks/drag_link.js' %}" defer></script>

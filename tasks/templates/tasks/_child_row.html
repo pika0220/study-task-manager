@@ -2,7 +2,7 @@
   カードの中で開いたときの、子タスク1件の行。カードより小さく、必要なものだけ出す。
   使い方：{% include "tasks/_child_row.html" with task=child level=段の数 %}
 {% endcomment %}
-<li class="flex items-start gap-3 py-1">
+<li data-task-id="{{ task.pk }}" data-title="{{ task.title }}" class="flex items-start gap-3 py-1">
   <!-- 完了・未完了の切り替え。見た目は小さめでも、押せる範囲は外側に広げて44px相当にする（after:-inset-1.5） -->
   <form method="post" action="{% url 'task_toggle' task.pk %}" class="shrink-0 pt-1.5">
     {% csrf_token %}

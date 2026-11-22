@@ -3,7 +3,8 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import IntegrityError, transaction
 from django.db.models import Count
-from django.http import FileResponse, Http404
+from django.core.exceptions import ValidationError
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -316,3 +317,78 @@ def source_photo(request, pk):
     # private：ブラウザ以外（途中のサーバーなど）に写真を保存させない
     response["Cache-Control"] = "private, max-age=3600"
     return response
+
+
+
+# ---- ドラッグ＆ドロップでつなぐ（Issue #29）----
+
+# relation の値 → 書きかえるタスクの欄
+LINK_FIELDS = {"child": "parent", "after": "prerequisite"}
+
+
+def _check_link(source, target, relation):
+    """source を target に「中に入れる（child）」「終わってからやる（after）」ができるか確かめる。
+
+    実際には保存せず、モデルの clean()（3段まで・輪にならない など）を通して確かめる。
+    ルールを1か所（モデル）にまとめておくと、フォームからでもドラッグからでも同じチェックになる。
+    戻り値：(できるか, できないときの理由)
+    """
+    if source.pk == target.pk:
+        return False, "同じタスクです．"
+    field = LINK_FIELDS[relation]
+    candidate = Task.objects.get(pk=source.pk)  # 保存しない「下書き」として読み直す
+    setattr(candidate, field, target)
+    try:
+        candidate.full_clean()
+    except ValidationError as error:
+        messages_for_field = error.message_dict.get(field) or error.messages
+        return False, messages_for_field[0]
+    return True, ""
+
+
+def _own_task_from_param(request, value):
+    """フォームやURLから来た番号で、自分のタスクを探す。数字でなければ404。"""
+    try:
+        pk = int(value)
+    except (TypeError, ValueError):
+        raise Http404
+    return get_object_or_404(request.user.tasks, pk=pk)
+
+
+@login_required
+def task_link_options(request, pk):
+    """カードを落としたときに、選べるつながりと、選べない理由を JSON で返す。"""
+    source = get_object_or_404(request.user.tasks, pk=pk)
+    target = _own_task_from_param(request, request.GET.get("target"))
+    result = {"source": source.title, "target": target.title}
+    for relation in LINK_FIELDS:
+        ok, reason = _check_link(source, target, relation)
+        result[relation] = {"ok": ok, "reason": reason}
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def task_link(request, pk):
+    """選んだつながりを保存して、元の画面に戻る。"""
+    source = get_object_or_404(request.user.tasks, pk=pk)
+    target = _own_task_from_param(request, request.POST.get("target"))
+    relation = request.POST.get("relation")
+    if relation not in LINK_FIELDS:
+        messages.error(request, "つなぎ方を選んでください．")
+    else:
+        ok, reason = _check_link(source, target, relation)
+        if not ok:
+            messages.error(request, reason)
+        else:
+            field = LINK_FIELDS[relation]
+            setattr(source, field, target)
+            source.save(update_fields=[field, "updated_at"])
+            if relation == "child":
+                messages.success(request, f"「{source.title}」を「{target.title}」の中に入れました．")
+            else:
+                messages.success(request, f"「{source.title}」は「{target.title}」が終わってからにしました．")
+    next_url = request.POST.get("next")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return redirect(next_url)
+    return redirect("home")

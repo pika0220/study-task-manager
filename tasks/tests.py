@@ -792,6 +792,107 @@ class PrerequisiteTests(TestCase):
         response = self.client.get(reverse("task_detail", args=[self.outline.pk]))
         self.assertContains(response, "🔒 まだ")
 
+
+class DragLinkTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.exam = Task.objects.create(owner=self.me, title="国家試験")
+        self.subject = Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
+        self.chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.subject)
+        self.report = Task.objects.create(owner=self.me, title="レポート")
+        self.client.force_login(self.me)
+
+    def options(self, source, target):
+        url = reverse("task_link_options", args=[source.pk])
+        return self.client.get(url, {"target": target.pk}).json()
+
+    def link(self, source, target, relation, **extra):
+        data = {"target": target.pk, "relation": relation}
+        data.update(extra)
+        return self.client.post(reverse("task_link", args=[source.pk]), data, follow=True)
+
+    def test_options_for_a_valid_pair(self):
+        data = self.options(self.report, self.subject)
+        self.assertEqual(data["source"], "レポート")
+        self.assertEqual(data["target"], "薬理学")
+        self.assertTrue(data["child"]["ok"])
+        self.assertTrue(data["after"]["ok"])
+
+    def test_options_explain_why_not(self):
+        # 3段目（第1章）の中には入れられない／自分の子孫（薬理学）の中には入れられない
+        self.assertIn("3段まで", self.options(self.report, self.chapter)["child"]["reason"])
+        data = self.options(self.exam, self.subject)
+        self.assertFalse(data["child"]["ok"])
+        self.assertIn("子タスクは選べません", data["after"]["reason"])
+        # 同じタスク同士
+        same = self.options(self.report, self.report)
+        self.assertEqual(same["child"]["reason"], "同じタスクです．")
+
+    def test_link_as_child(self):
+        response = self.link(self.report, self.exam, "child")
+        self.assertContains(response, "「レポート」を「国家試験」の中に入れました")
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.parent, self.exam)
+
+    def test_link_as_after(self):
+        response = self.link(self.report, self.subject, "after")
+        self.assertContains(response, "「レポート」は「薬理学」が終わってからにしました")
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.prerequisite, self.subject)
+        self.assertTrue(self.report.is_locked)
+
+    def test_invalid_link_is_not_saved(self):
+        response = self.link(self.report, self.chapter, "child")
+        self.assertContains(response, "3段まで")
+        self.report.refresh_from_db()
+        self.assertIsNone(self.report.parent)
+        # 輪になる前後
+        self.report.prerequisite = self.exam
+        self.report.save()
+        self.link(self.exam, self.report, "after")
+        self.exam.refresh_from_db()
+        self.assertIsNone(self.exam.prerequisite)
+
+    def test_unknown_relation(self):
+        response = self.link(self.report, self.exam, "sibling")
+        self.assertContains(response, "つなぎ方を選んでください")
+
+    def test_other_users_tasks_are_404(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        self.assertEqual(
+            self.client.get(reverse("task_link_options", args=[self.report.pk]), {"target": others.pk}).status_code, 404
+        )
+        response = self.client.post(reverse("task_link", args=[others.pk]), {"target": self.report.pk, "relation": "child"})
+        self.assertEqual(response.status_code, 404)
+        response = self.client.post(reverse("task_link", args=[self.report.pk]), {"target": others.pk, "relation": "child"})
+        self.assertEqual(response.status_code, 404)
+        self.report.refresh_from_db()
+        self.assertIsNone(self.report.parent)
+
+    def test_bad_target_value_is_404(self):
+        url = reverse("task_link_options", args=[self.report.pk])
+        self.assertEqual(self.client.get(url, {"target": "abc"}).status_code, 404)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_get_is_not_allowed_for_saving(self):
+        self.assertEqual(self.client.get(reverse("task_link", args=[self.report.pk])).status_code, 405)
+
+    def test_returns_to_next_page(self):
+        detail = reverse("task_detail", args=[self.exam.pk])
+        response = self.client.post(
+            reverse("task_link", args=[self.report.pk]), {"target": self.exam.pk, "relation": "child", "next": detail}
+        )
+        self.assertRedirects(response, detail)
+
+    def test_cards_are_draggable_and_dialog_is_present(self):
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, f'data-task-id="{self.report.pk}" data-title="レポート"')
+        self.assertContains(response, 'id="link-dialog"')
+        self.assertContains(response, "tasks/drag_link.js")
+        self.assertContains(response, "カードを長押しして別のカードに重ねると")
+
 class TaskModelTests(TestCase):
     def setUp(self):
         User = get_user_model()
