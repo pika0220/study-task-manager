@@ -84,6 +84,10 @@ class Task(models.Model):
         related_name="dependents",  # 逆向き：このタスクが終わると進められるタスク
         verbose_name="先にやること",
     )
+    # マインドマップ（Issue #30）の上での置き場所（左上の点の位置、px）。
+    # まだマップで動かしていないタスクは空（None）のままで、マップの画面が自動で並べる
+    map_x = models.FloatField("マップの横の位置", null=True, blank=True)
+    map_y = models.FloatField("マップの縦の位置", null=True, blank=True)
     is_done = models.BooleanField("完了", default=False)
     done_at = models.DateTimeField("完了した日時", null=True, blank=True)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)

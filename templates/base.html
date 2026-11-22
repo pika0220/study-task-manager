@@ -53,6 +53,10 @@
         <span class="text-xl" aria-hidden="true">➕</span>
         <span class="dock-label">追加</span>
       </a>
+      <a href="{% url 'task_map' %}" class="{% if request.resolver_match.url_name == 'task_map' or request.resolver_match.url_name == 'task_map_root' %}dock-active{% endif %}">
+        <span class="text-xl" aria-hidden="true">🗺️</span>
+        <span class="dock-label">マップ</span>
+      </a>
       <button type="button" class="text-base-content/50" disabled title="準備中">
         <span class="text-xl" aria-hidden="true">📊</span>
         <span class="dock-label">進み具合</span>

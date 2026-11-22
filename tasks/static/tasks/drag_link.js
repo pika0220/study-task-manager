@@ -3,7 +3,7 @@
 // 流れ：
 //   1. [data-task-id] の付いた要素（カード・子タスクの行）を長押し（LONG_PRESS ミリ秒）すると持ち上がる
 //   2. 指（マウス）についてくる「影」を出し、下にあるカードを光らせる
-//   3. 離したら、サーバーに「どのつなぎ方ができるか」を聞き（task_link_options）、選ぶ画面を開く
+//   3. 離したら、選ぶ画面を開く（link_dialog.js。サーバーに「どのつなぎ方ができるか」を聞く）
 //   4. 選んだボタンでフォームを送る（task_link）。保存とルールのチェックはサーバーが行う
 //
 // 長押しにしているのは、スマホでふつうに指を動かしたときの「画面のスクロール」とぶつからないようにするため。
@@ -11,11 +11,10 @@
   const LONG_PRESS = 350; // 何ミリ秒押し続けたら持ち上げるか
   const MOVE_TOLERANCE = 8; // 長押しの途中で、これ以上指が動いたらスクロールとみなしてやめる（px）
 
-  const dialog = document.getElementById("link-dialog");
-  if (!dialog) return;
-  const optionsUrlTemplate = dialog.dataset.optionsUrl; // 例：/tasks/0/link/options/
-  const linkUrlTemplate = dialog.dataset.linkUrl; // 例：/tasks/0/link/
-  const urlFor = (template, id) => template.replace("/0/", `/${id}/`);
+  // 選ぶ画面を開く部品（link_dialog.js）。先に読み込まれている
+  const link = window.TaskLink;
+  if (!link) return;
+  const dialog = link.dialog;
 
   let timer = null; // 長押しを待つタイマー
   let start = null; // 押しはじめた位置
@@ -100,7 +99,9 @@
     suppressClick = true;
     setTimeout(() => (suppressClick = false), 500);
     cleanup();
-    if (to) openDialog(from, to);
+    if (to) {
+      link.open({ id: from.dataset.taskId, title: from.dataset.title }, { id: to.dataset.taskId, title: to.dataset.title });
+    }
   });
 
   document.addEventListener("pointercancel", cleanup);
@@ -129,36 +130,4 @@
     },
     true,
   );
-
-  // ---- 選ぶ画面 ----
-  const setChoice = (relation, info) => {
-    const button = dialog.querySelector(`button[value="${relation}"]`);
-    const reason = dialog.querySelector(`[data-reason="${relation}"]`);
-    button.disabled = !info.ok;
-    reason.textContent = info.ok ? "" : info.reason;
-  };
-
-  const openDialog = async (from, to) => {
-    const sourceId = from.dataset.taskId;
-    const targetId = to.dataset.taskId;
-    const form = dialog.querySelector("form.link-form");
-    form.action = urlFor(linkUrlTemplate, sourceId);
-    form.querySelector('input[name="target"]').value = targetId;
-    dialog.querySelectorAll("[data-source-title]").forEach((el) => (el.textContent = from.dataset.title));
-    dialog.querySelectorAll("[data-target-title]").forEach((el) => (el.textContent = to.dataset.title));
-    ["child", "after"].forEach((relation) => setChoice(relation, { ok: false, reason: "確かめています…" }));
-    dialog.showModal();
-    try {
-      const response = await fetch(`${urlFor(optionsUrlTemplate, sourceId)}?target=${targetId}`, {
-        headers: { Accept: "application/json" },
-      });
-      const data = await response.json();
-      setChoice("child", data.child);
-      setChoice("after", data.after);
-    } catch (error) {
-      ["child", "after"].forEach((relation) =>
-        setChoice(relation, { ok: false, reason: "うまく確かめられませんでした．もう一度ためしてください．" }),
-      );
-    }
-  };
 })();

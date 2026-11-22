@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ task.title }}{% endblock %}
 
@@ -182,4 +183,6 @@
   {% endif %}
 
   {% include "tasks/_link_dialog.html" %}
+  <!-- カードを長押しして、別のカードに重ねる動き（Issue #29） -->
+  <script src="{% static 'tasks/drag_link.js' %}" defer></script>
 {% endblock %}

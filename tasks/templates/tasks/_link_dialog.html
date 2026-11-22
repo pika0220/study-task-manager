@@ -1,8 +1,9 @@
 {% load static %}
 {% comment %}
   カードを別のカードに落としたときに出る「つなぎ方」を選ぶ画面（Issue #29）。
-  使い方：ホームや詳細画面に {% include "tasks/_link_dialog.html" %} を1回だけ置く。
-  中身（タスクの名前・押せるボタン）は drag_link.js が入れる。
+  使い方：ホーム・詳細画面・マップに {% include "tasks/_link_dialog.html" %} を1回だけ置く。
+  中身（タスクの名前・押せるボタン）は link_dialog.js が入れる。
+  開くきっかけ（カードのドラッグ＝drag_link.js、マップの線＝task_map.js）は、使う画面で読み込む。
 {% endcomment %}
 <!-- dialog：HTMLにもともとある「重ねて出す画面」。modal-bottom で、スマホでは下から出てくる -->
 <dialog id="link-dialog" class="modal modal-bottom sm:modal-middle"
@@ -47,4 +48,4 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 </style>
-<script src="{% static 'tasks/drag_link.js' %}" defer></script>
+<script src="{% static 'tasks/link_dialog.js' %}" defer></script>

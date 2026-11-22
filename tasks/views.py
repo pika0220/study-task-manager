@@ -1,8 +1,11 @@
+import math
+from collections import defaultdict
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import IntegrityError, transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -388,7 +391,392 @@ def task_link(request, pk):
                 messages.success(request, f"「{source.title}」を「{target.title}」の中に入れました．")
             else:
                 messages.success(request, f"「{source.title}」は「{target.title}」が終わってからにしました．")
+    return _redirect_next(request, "home")
+
+
+def _redirect_next(request, default):
+    """フォームの next（元いた画面）に戻る。ほかのサイトのURLは使わず default に戻す。"""
     next_url = request.POST.get("next")
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
-    return redirect("home")
+    return redirect(default)
+
+
+# ---- マインドマップ（Issue #30）----
+# メインタスク（親のないタスク）ごとに1枚のマップを作る。
+# メインタスクを真ん中に置き、子タスク・孫タスクを枝のように外へ広げる。
+
+MAP_LIMIT = 5000  # 置ける場所の上限（px）。ありえない大きな数字を保存しないため
+MAP_CENTER = 800  # メインタスクを置く場所（点の中心）。まわりに広げられるよう、紙の真ん中あたりにする
+MAP_RADIUS = 200  # 自動で並べるとき、1段外へ広がるごとに離す距離
+MAP_NODE_WIDTH = 130  # 点の大きさ（task_map.html の .map-node と同じ）
+MAP_NODE_HEIGHT = 44
+
+
+def _map_tree(root, children):
+    """メインタスクと、その下の未完了のタスク（子・孫）を、上から順に並べたリストを返す。"""
+    result = [root]
+    for child in children[root.pk]:
+        if not child.is_done:
+            result += _map_tree(child, children)
+    return result
+
+
+def _map_layout_children(root, shown):
+    """マップの上で「どの点から伸ばすか」を決める。{伸ばす元の番号: [タスク, …]} と、前後でつないだタスクの番号の集合を返す。
+
+    ふつうは親から伸ばす。ただし、先にやることが「同じ親の中のタスク（きょうだい）」のときは、
+    先にやることの先に伸ばす（メインタスク → 文献調査 → 考察を書く のように、順番が一列に見える）。
+    データ（親子・前後）は変えず、マップでの見せ方だけを変える。
+    """
+    by_pk = {t.pk: t for t in shown}
+    layout_children = defaultdict(list)
+    chained = set()
+    for task in shown:
+        if task.pk == root.pk:
+            continue
+        before = by_pk.get(task.prerequisite_id)
+        if before is not None and before.parent_id == task.parent_id:
+            layout_children[before.pk].append(task)
+            chained.add(task.pk)
+        else:
+            layout_children[task.parent_id].append(task)
+    return layout_children, chained
+
+
+def _radial_layout(root, shown, children):
+    """マップの上での置き場所（点の左上）を {タスクの番号: (x, y)} で返す（保存はしない）。
+
+    children：どの点から伸ばすか（_map_layout_children で決めたもの）。
+
+    1. まず「理想の場所」を決める。メインタスクを真ん中に置き、まわり（360度）を子タスクで分け合う。
+       その先のタスクは、元の点から同じ距離だけ外向きに並ぶ。先が多いほど広い角度をもらう。
+    2. 置き場所が保存されているタスクは、その場所のまま。
+       まだ決まっていないタスクは「親の今の場所 ＋ 理想の場所での親からのずれ」に置く。
+       こうすると、親を動かしたあとに足した子タスクも、親のそばに出てくる。
+    3. その場所がほかの点と重なるときは、親のまわりを少しずつ回して、空いている場所を探す。
+    """
+    shown_ids = {t.pk for t in shown}
+
+    def kids(task):
+        return [c for c in children[task.pk] if c.pk in shown_ids]
+
+    def leaves(task):
+        """枝の先（子のないタスク）の数。広げる角度の割合に使う。"""
+        branch = kids(task)
+        return sum(leaves(k) for k in branch) if branch else 1
+
+    ideal = {}
+
+    def place_ideal(task, level, start, end, position):
+        """task を position に置き、その先のタスクを、もらった角度（start～end）の中に広げる。"""
+        ideal[task.pk] = position
+        if level > 0:
+            # 真ん中より外のタスクは、元の点から見て外向き ±60度 の中だけに広げる
+            # （広すぎると、先のタスクが真ん中のほうへ戻ってきてしまうため）
+            middle = (start + end) / 2
+            half = min((end - start) / 2, math.pi / 3)
+            start, end = middle - half, middle + half
+        branch = kids(task)
+        total = sum(leaves(k) for k in branch)
+        angle = start
+        for k in branch:
+            span = (end - start) * leaves(k) / total
+            direction = angle + span / 2
+            # 先のタスクは、元の点から同じ距離（MAP_RADIUS）だけ離れたところに置く
+            child = (position[0] + MAP_RADIUS * math.cos(direction), position[1] + MAP_RADIUS * math.sin(direction))
+            place_ideal(k, level + 1, angle, angle + span, child)
+            angle += span
+
+    # 左（-180度）から1周。子が1つなら右、2つなら上と下に出る（スマホの縦長の画面に合う）
+    place_ideal(root, 0, -math.pi, math.pi, (MAP_CENTER, MAP_CENTER))
+
+    # 置き場所が保存されている点を先に置いておく（新しい点が、これらと重ならないようにするため）
+    centers = {
+        t.pk: (t.map_x + MAP_NODE_WIDTH / 2, t.map_y + MAP_NODE_HEIGHT / 2)
+        for t in shown
+        if t.map_x is not None and t.map_y is not None
+    }
+
+    def overlaps(point):
+        x, y = point
+        return any(
+            abs(x - cx) < MAP_NODE_WIDTH + 12 and abs(y - cy) < MAP_NODE_HEIGHT + 12 for cx, cy in centers.values()
+        )
+
+    def free_spot(parent_center, offset):
+        """親から offset だけ離れた場所を基本に、重ならない場所を探す。"""
+        px, py = parent_center
+        dx, dy = offset
+        for ring in range(4):  # 1周しても見つからなければ、少し遠くでもう1周
+            stretch = 1 + 0.5 * ring
+            for step in range(12):  # 30度ずつ、右回り・左回りに交互に回す（0, +30, -30, +60, …）
+                turn = math.radians(30 * ((step + 1) // 2) * (1 if step % 2 else -1))
+                rx = (dx * math.cos(turn) - dy * math.sin(turn)) * stretch
+                ry = (dx * math.sin(turn) + dy * math.cos(turn)) * stretch
+                if not overlaps((px + rx, py + ry)):
+                    return (px + rx, py + ry)
+        return (px + dx, py + dy)  # どうしても空きがなければ、重なってもよいので基本の場所に置く
+
+    def place_actual(task, parent):
+        if task.pk not in centers:
+            if parent is None:
+                centers[task.pk] = ideal[task.pk]
+            else:
+                ix, iy = ideal[task.pk]
+                qx, qy = ideal[parent.pk]
+                offset = (ix - qx, iy - qy)
+                if offset == (0, 0):
+                    offset = (MAP_RADIUS, 0)
+                centers[task.pk] = free_spot(centers[parent.pk], offset)
+        for k in kids(task):
+            place_actual(k, task)
+
+    place_actual(root, None)
+    return {
+        pk: (min(max(cx - MAP_NODE_WIDTH / 2, 0), MAP_LIMIT), min(max(cy - MAP_NODE_HEIGHT / 2, 0), MAP_LIMIT))
+        for pk, (cx, cy) in centers.items()
+    }
+
+
+@login_required
+def task_map(request, pk=None):
+    """マップ画面。pk：真ん中に置くメインタスクの番号。点と線は task_map.js が描く。
+
+    /map/ で開いたときは、いちばん上のメインタスクのマップへ移る。
+    子タスクの番号で開いたときは、そのメインタスクのマップへ移る。
+    """
+    # 自分のタスクを1回の問い合わせでまとめて読み、親子の形は Python の中で組み立てる
+    tasks = list(request.user.tasks.select_related("prerequisite"))
+    by_id = {t.pk: t for t in tasks}
+    children = defaultdict(list)
+    for task in tasks:
+        if task.parent_id:
+            children[task.parent_id].append(task)
+
+    # 切り替えメニューに出すメインタスク（未完了だけ）。枝のあるものを先に、あとは重要度・締切の順のまま
+    roots = [t for t in tasks if t.parent_id is None and not t.is_done]
+    menu = [{"pk": t.pk, "title": t.title, "count": len(_map_tree(t, children)) - 1} for t in roots]
+    menu.sort(key=lambda item: item["count"] == 0)
+
+    if pk is None:
+        if menu:
+            return redirect("task_map_root", pk=menu[0]["pk"])
+        return render(request, "tasks/task_map.html", {"nodes": [], "menu": [], "root": None})
+
+    task = by_id.get(pk)
+    if task is None:
+        raise Http404
+    root = task
+    while root.parent_id is not None:
+        root = by_id[root.parent_id]
+    if root.pk != pk:
+        return redirect("task_map_root", pk=root.pk)
+
+    shown = _map_tree(root, children)
+    layout_children, chained = _map_layout_children(root, shown)
+    positions = _radial_layout(root, shown, layout_children)
+    # 自動で決めた場所は、すぐに保存しておく。保存しないと、タスクを足したりつないだりするたびに
+    # 並べ直されて、点が勝手に動いてしまうため。bulk_update：まとめて1回の問い合わせで保存する
+    unplaced = [t for t in shown if t.map_x is None or t.map_y is None]
+    for t in unplaced:
+        t.map_x, t.map_y = positions[t.pk]
+    if unplaced:
+        Task.objects.bulk_update(unplaced, ["map_x", "map_y"])
+
+    shown_ids = {t.pk for t in shown}
+    # 「＋ タスクを足す」で選べる、つなぐ先（このマップのすべての点）。
+    # 何段目か（level）と真ん中か（is_root）も渡し、選べないつなぎ方を画面で押せなくする
+    # 何段目かは、上から順に並んだ shown（親が必ず子より先）をたどって数える。
+    # t.depth() を使うと、点ごとにデータベースへ親を聞きに行ってしまうため
+    levels = {}
+    parent_choices = []
+    for t in shown:
+        level = 1 if t.pk == root.pk else levels[t.parent_id] + 1
+        levels[t.pk] = level
+        label = ("　" * (level - 1)) + ("└ " if level > 1 else "") + t.title
+        parent_choices.append({"pk": t.pk, "label": label, "level": level, "is_root": t.pk == root.pk})
+    nodes = [
+        {
+            "id": t.pk,
+            "title": t.title,
+            "x": positions[t.pk][0],
+            "y": positions[t.pk][1],
+            "importance": t.importance,
+            "locked": t.is_locked and not t.is_done,
+            "done": t.is_done,
+            "root": t.pk == root.pk,
+            "url": reverse("task_detail", args=[t.pk]),
+            # 線を引くのは、相手もこのマップに出ているときだけ
+            "parent": t.parent_id if t.parent_id in shown_ids else None,
+            "prerequisite": t.prerequisite_id if t.prerequisite_id in shown_ids else None,
+            # True：先にやること（同じ親の中のタスク）の先に描く。親との線は引かない
+            "chained": t.pk in chained,
+        }
+        for t in shown
+    ]
+    return render(
+        request,
+        "tasks/task_map.html",
+        {"nodes": nodes, "menu": menu, "root": root, "parent_choices": parent_choices},
+    )
+
+
+def _map_coordinate(value):
+    """フォームから来た位置を数字にする。数字でなければ None。はみ出す数字は 0～MAP_LIMIT におさめる。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):  # nan（数字でない）や inf（無限大）は受け付けない
+        return None
+    return min(max(number, 0), MAP_LIMIT)
+
+
+@login_required
+@require_POST
+def task_map_position(request, pk):
+    """マップで点を動かしたときに、置き場所を保存する（JavaScript から送られる）。"""
+    task = get_object_or_404(request.user.tasks, pk=pk)
+    x = _map_coordinate(request.POST.get("x"))
+    y = _map_coordinate(request.POST.get("y"))
+    if x is None or y is None:
+        return JsonResponse({"ok": False}, status=400)
+    task.map_x, task.map_y = x, y
+    # 置き場所は中身の変更ではないので、更新日時（updated_at）は変えない
+    task.save(update_fields=["map_x", "map_y"])
+    return JsonResponse({"ok": True, "x": x, "y": y})
+
+
+@login_required
+@require_POST
+def task_map_create(request):
+    """マップから、名前だけでタスクを足す。締切などはあとで詳細画面から入れる。
+
+    anchor（どのタスクに）と relation（つなぎ方）で、足す場所を決める。
+      - relation="child"：anchor の中に入れる（anchor の子タスク）
+      - relation="after"：anchor が終わってからやる。anchor と同じ段（anchor の親の中）に置く
+    anchor がなければ、新しいメインタスク（新しいマップ）になる。
+    """
+    title = (request.POST.get("title") or "").strip()
+    max_length = Task._meta.get_field("title").max_length
+    anchor = None
+    if request.POST.get("anchor"):
+        anchor = _own_task_from_param(request, request.POST.get("anchor"))
+    relation = request.POST.get("relation", "child")
+
+    task = Task(
+        owner=request.user,
+        title=title,
+        map_x=_map_coordinate(request.POST.get("x")),
+        map_y=_map_coordinate(request.POST.get("y")),
+    )
+    error = None
+    if not title:
+        error = "タスクの名前を入れてください．"
+    elif len(title) > max_length:
+        error = f"タスクの名前は{max_length}文字以内にしてください．"
+    elif anchor and relation not in LINK_FIELDS:
+        error = "つなぎ方を選んでください．"
+    elif anchor and relation == "after" and anchor.parent_id is None:
+        # 真ん中のメインタスクには親がないので、その「となり」に置けない（置くと別のマップになってしまう）
+        error = "真ん中のメインタスクには「終わってからやる」でつなげられません．「中に入れる」を選んでください．"
+    elif anchor:
+        if relation == "child":
+            task.parent = anchor
+        else:
+            task.parent = anchor.parent
+            task.prerequisite = anchor
+    if error is None:
+        try:
+            task.full_clean()  # 3段まで など、ほかの画面と同じルールで確かめる
+        except ValidationError as validation_error:
+            error = validation_error.messages[0]
+    if error:
+        messages.error(request, error)
+    else:
+        task.save()
+        if anchor is None:
+            messages.success(request, f"新しいマップ「{title}」を作りました．")
+            return redirect("task_map_root", pk=task.pk)
+        if relation == "child":
+            messages.success(request, f"「{title}」を「{anchor.title}」の中に足しました．")
+        else:
+            messages.success(request, f"「{title}」を，「{anchor.title}」が終わってからやるタスクとして足しました．")
+    if anchor:
+        return redirect("task_map_root", pk=anchor.pk)  # 子タスクの番号でも、メインタスクのマップに移る
+    return redirect("task_map")
+
+
+@login_required
+@require_POST
+def task_unlink(request, pk):
+    """マップの線を押して、つながり（親子・前後）を外す。タスクそのものは消さない。"""
+    task = get_object_or_404(request.user.tasks.select_related("parent", "prerequisite"), pk=pk)
+    relation = request.POST.get("relation")
+    field = LINK_FIELDS.get(relation)
+    other = getattr(task, field) if field else None
+    if other is None:
+        messages.error(request, "外すつながりがありません．")
+    else:
+        setattr(task, field, None)
+        task.save(update_fields=[field, "updated_at"])
+        if relation == "child":
+            # 親から出たタスクはメインタスクになるので、このマップからは消えて、自分のマップを持つ
+            messages.success(
+                request, f"「{task.title}」を「{other.title}」の中から出しました．「{task.title}」は別のマップになります．"
+            )
+        else:
+            messages.success(request, f"「{task.title}」と「{other.title}」の前後のつながりを外しました．")
+    return _redirect_next(request, "task_map")
+
+
+@login_required
+@require_POST
+def task_relink(request, pk):
+    """マップの線を押して、つなぎ方を切り替える（📁 中に入れる ⇔ 🔒 終わってからやる）。
+
+    relation：今のつなぎ方。
+      - "child" → 🔒：親（B）が終わってからやる形にする。マップから消えないよう、B と同じ段（B の親の中）に移す
+      - "after" → 📁：先にやること（B）の中に入れる
+    """
+    task = get_object_or_404(request.user.tasks.select_related("parent__parent", "prerequisite"), pk=pk)
+    relation = request.POST.get("relation")
+    error = None
+    if relation == "child" and task.parent is not None:
+        other = task.parent
+        if other.parent_id is None:
+            error = "真ん中のメインタスクとは，「終わってからやる」のつながりにできません．"
+        else:
+            task.parent = other.parent
+            task.prerequisite = other
+            done_message = f"「{task.title}」を，「{other.title}」が終わってからやる，に切り替えました．"
+    elif relation == "after" and task.prerequisite is not None:
+        other = task.prerequisite
+        task.prerequisite = None
+        task.parent = other
+        done_message = f"「{task.title}」を，「{other.title}」の中に入れる，に切り替えました．"
+    else:
+        error = "切り替えるつながりがありません．"
+    if error is None:
+        try:
+            task.full_clean()  # 3段まで・輪にならない など、ほかの画面と同じルールで確かめる
+        except ValidationError as validation_error:
+            error = validation_error.messages[0]
+    if error:
+        messages.error(request, error)
+    else:
+        task.save(update_fields=["parent", "prerequisite", "updated_at"])
+        messages.success(request, done_message)
+    return _redirect_next(request, "task_map")
+
+
+@login_required
+@require_POST
+def task_map_arrange(request, pk):
+    """マップの点の置き場所を消して、自動で並べ直す（このマップのタスクだけ）。"""
+    root = get_object_or_404(request.user.tasks, pk=pk, parent=None)
+    # 入れ子は3段までなので、メインタスク・子・孫で、このマップのタスクが全部そろう
+    request.user.tasks.filter(Q(pk=root.pk) | Q(parent=root) | Q(parent__parent=root)).update(map_x=None, map_y=None)
+    messages.success(request, "点を自動で並べ直しました．")
+    return redirect("task_map_root", pk=root.pk)
