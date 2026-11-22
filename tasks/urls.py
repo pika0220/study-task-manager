@@ -14,6 +14,15 @@ urlpatterns = [
     # ドラッグ＆ドロップでつなぐ：選べるつながりを調べる（GET）・保存する（POST）
     path("tasks/<int:pk>/link/options/", views.task_link_options, name="task_link_options"),
     path("tasks/<int:pk>/link/", views.task_link, name="task_link"),
+    # マインドマップ（Issue #30）：画面・点の置き場所の保存・名前だけで追加・つながりを外す／切り替える
+    path("map/", views.task_map, name="task_map"),
+    # 5番のメインタスクのマップ：/map/5/
+    path("map/<int:pk>/", views.task_map, name="task_map_root"),
+    path("map/<int:pk>/arrange/", views.task_map_arrange, name="task_map_arrange"),
+    path("map/tasks/new/", views.task_map_create, name="task_map_create"),
+    path("tasks/<int:pk>/position/", views.task_map_position, name="task_map_position"),
+    path("tasks/<int:pk>/unlink/", views.task_unlink, name="task_unlink"),
+    path("tasks/<int:pk>/relink/", views.task_relink, name="task_relink"),
     # 資料（プログラムの中の名前は source）
     path("tasks/<int:pk>/sources/new/", views.source_create, name="source_create"),
     path("sources/<int:pk>/delete/", views.source_delete, name="source_delete"),
