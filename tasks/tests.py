@@ -1627,3 +1627,131 @@ class BackNavigationTests(TestCase):
         response = self.client.post(reverse("category_create"), {"name": "部活", "back": self.room})
         self.assertRedirects(response, url)
         self.assertContains(self.client.get(reverse("category_list")), "← ホーム")
+
+
+class RelatedLinkTests(TestCase):
+    """🔗 関連（Issue #43）。順番なし・向きなし・いくつでも。マップと詳細で付ける・見る・外す。"""
+
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        cats = {c.name: c for c in self.me.categories.all()}
+        self.research, self.lesson = cats["研究"], cats["授業"]
+        self.study = Task.objects.create(owner=self.me, title="卒業研究", category=self.research, on_map=True)
+        self.reading = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        self.slides = Task.objects.create(owner=self.me, title="発表スライド", parent=self.study, prerequisite=self.reading)
+        self.paper = Task.objects.create(owner=self.me, title="論文を読む", category=self.research, on_map=True)
+        self.report = Task.objects.create(owner=self.me, title="実習レポート", category=self.lesson, on_map=True)
+        self.others_task = Task.objects.create(owner=self.other, title="他の人のタスク")
+        self.client.force_login(self.me)
+
+    def options(self, source, target):
+        url = reverse("task_link_options", args=[source.pk])
+        return self.client.get(url, {"target": target.pk}).json()
+
+    def link(self, source, target, relation="related"):
+        data = {"target": target.pk, "relation": relation}
+        return self.client.post(reverse("task_link", args=[source.pk]), data, follow=True)
+
+    def unlink(self, task, target, **extra):
+        data = {"relation": "related", "target": target.pk, **extra}
+        return self.client.post(reverse("task_unlink", args=[task.pk]), data, follow=True)
+
+    def map_nodes(self, category):
+        response = self.client.get(reverse("task_map_room", args=[category.pk]))
+        return {node["title"]: node for node in response.context["nodes"]}
+
+    # ---- つなげるか ----
+    def test_options_allow_related_for_unconnected_tasks(self):
+        data = self.options(self.reading, self.report)
+        self.assertEqual(data["related"], {"ok": True, "reason": "", "notes": []})
+
+    def test_options_explain_why_related_is_not_allowed(self):
+        self.assertEqual(self.options(self.reading, self.reading)["related"]["reason"], "同じタスクです．")
+        # 📁（親子）・🔒（前後）で直接つながっている相手は、どちらから見てもだめ
+        self.assertEqual(self.options(self.reading, self.study)["related"]["reason"], "📁 でつながっています．")
+        self.assertEqual(self.options(self.study, self.reading)["related"]["reason"], "📁 でつながっています．")
+        self.assertEqual(self.options(self.slides, self.reading)["related"]["reason"], "🔒 でつながっています．")
+        self.assertEqual(self.options(self.reading, self.slides)["related"]["reason"], "🔒 でつながっています．")
+        self.paper.related.add(self.report)
+        self.assertEqual(self.options(self.report, self.paper)["related"]["reason"], "もう 🔗 でつながっています．")
+
+    def test_cannot_relate_to_another_users_task(self):
+        self.assertEqual(self.client.get(reverse("task_link_options", args=[self.paper.pk]), {"target": self.others_task.pk}).status_code, 404)
+        self.assertEqual(self.link(self.paper, self.others_task).status_code, 404)
+        self.assertEqual(self.paper.related_problem(self.others_task), "他の人のタスクとはつなげません．")
+        self.assertFalse(self.paper.related.exists())
+
+    # ---- つなぐ ----
+    def test_link_related_works_both_ways_and_many_times(self):
+        response = self.link(self.reading, self.report)
+        self.assertContains(response, "「文献調査」と「実習レポート」を 🔗 でつなぎました")
+        self.link(self.reading, self.paper)
+        # 向きがないので、相手から見ても つながっている
+        self.assertEqual(set(self.reading.related.all()), {self.report, self.paper})
+        self.assertEqual(list(self.report.related.all()), [self.reading])
+        # 親子・前後・分類は変わらない
+        self.reading.refresh_from_db()
+        self.assertEqual(self.reading.parent, self.study)
+        self.assertEqual(self.reading.category, self.research)
+
+    def test_link_related_twice_is_refused(self):
+        self.link(self.paper, self.report)
+        response = self.link(self.report, self.paper)
+        self.assertContains(response, "もう 🔗 でつながっています．")
+        self.assertEqual(self.paper.related.count(), 1)
+
+    def test_making_folder_or_lock_link_replaces_related(self):
+        self.paper.related.add(self.report, self.study)
+        # つなぐ前に「🔗 は外れる」と知らせる
+        self.assertIn("🔗 → 外れる（線は1本だけ）", self.options(self.paper, self.study)["child"]["notes"])
+        self.link(self.paper, self.study, "child")
+        self.link(self.report, self.paper, "after")
+        self.assertFalse(self.paper.related.exists())
+
+    # ---- 外す ----
+    def test_unlink_related_from_either_side(self):
+        self.paper.related.add(self.report)
+        response = self.unlink(self.report, self.paper, next=reverse("task_detail", args=[self.report.pk]))
+        self.assertRedirects(response, reverse("task_detail", args=[self.report.pk]))
+        self.assertContains(response, "「実習レポート」と「論文を読む」の 🔗 を外しました")
+        self.assertFalse(self.paper.related.exists())
+        # タスクは消えない
+        self.assertTrue(Task.objects.filter(pk=self.report.pk).exists())
+
+    def test_unlink_related_needs_a_connected_target(self):
+        self.assertContains(self.unlink(self.paper, self.report), "外すつながりがありません．")
+        response = self.client.post(reverse("task_unlink", args=[self.paper.pk]), {"relation": "related", "target": "x"}, follow=True)
+        self.assertContains(response, "外すつながりがありません．")
+        # 他の人のタスクのつながりは外せない
+        self.others_task.related.add(Task.objects.create(owner=self.other, title="他の人の2"))
+        self.assertEqual(self.unlink(self.others_task, self.others_task.related.get()).status_code, 404)
+
+    def test_deleting_a_task_removes_its_related_links(self):
+        self.paper.related.add(self.report)
+        self.report.delete()
+        self.assertFalse(self.paper.related.exists())
+
+    # ---- 見せる ----
+    def test_map_sends_related_partners_in_the_same_room_only(self):
+        self.paper.related.add(self.slides, self.report)  # 実習レポートは「授業」の部屋
+        nodes = self.map_nodes(self.research)
+        self.assertEqual(nodes["論文を読む"]["related"], [self.slides.pk])
+        self.assertEqual(nodes["発表スライド"]["related"], [self.paper.pk])
+        self.assertEqual(nodes["卒業研究"]["related"], [])
+        self.assertEqual(self.map_nodes(self.lesson)["実習レポート"]["related"], [])
+
+    def test_detail_lists_related_tasks_from_every_room(self):
+        detail = reverse("task_detail", args=[self.paper.pk])
+        self.assertContains(self.client.get(detail), "🔗 なし")
+        self.paper.related.add(self.report)
+        response = self.client.get(detail + "?" + urlencode({"back": reverse("task_map_room", args=[self.research.pk])}))
+        self.assertNotContains(response, "🔗 なし")
+        # 相手へのリンクにも戻り先を付け、✕ で外したら同じ画面（戻り先つき）に戻る
+        self.assertContains(response, reverse("task_detail", args=[self.report.pk]) + response.context["back_query"])
+        self.assertContains(response, '<input type="hidden" name="target" value="%d">' % self.report.pk)
+        self.assertContains(response, "「実習レポート」との 🔗 を外す")
+
+    def test_link_dialog_offers_related(self):
+        self.assertContains(self.client.get(reverse("home")), 'value="related"')

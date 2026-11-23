@@ -109,6 +109,32 @@
       {% else %}
         <p class="text-base-content/60">🔒 なし（編集 → 🔒 何が終わってから取りかかる？）</p>
       {% endif %}
+
+      <!-- 🔗 関連（Issue #43）：順番なしでつないだタスク。違う分類のタスクも、ここには全部出る -->
+      {% with related=task.related.all %}
+        {% if related %}
+          <div class="flex flex-col gap-1">
+            <span>🔗 関連</span>
+            <ul class="flex flex-wrap gap-2">
+              {% for other in related %}
+                <li class="flex items-center rounded-lg border border-base-300">
+                  <a href="{% url 'task_detail' other.pk %}{{ back_query }}"
+                     class="break-words py-1 pl-2 pr-1 hover:underline {% if other.is_done %}text-base-content/50 line-through{% endif %}">{{ other.title }}</a>
+                  <form method="post" action="{% url 'task_unlink' task.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="relation" value="related">
+                    <input type="hidden" name="target" value="{{ other.pk }}">
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button class="btn btn-ghost btn-xs btn-square" aria-label="「{{ other.title }}」との 🔗 を外す">✕</button>
+                  </form>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% else %}
+          <p class="text-base-content/60">🔗 なし（ホーム・🗺️ マップで，カード → 別のカード）</p>
+        {% endif %}
+      {% endwith %}
     </div>
   </div>
 

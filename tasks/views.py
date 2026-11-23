@@ -141,6 +141,7 @@ class TaskDetailView(OwnTaskMixin, DetailView):
                 "children__children__prerequisite",
                 "sources",
                 "dependents",
+                "related",
             )
         )
 
@@ -397,6 +398,8 @@ def source_photo(request, pk):
 
 # relation の値 → 書きかえるタスクの欄
 LINK_FIELDS = {"child": "parent", "after": "prerequisite"}
+# 選べるつなぎ方の全部。"related"（🔗 関連・Issue #43）は欄ではなく、多対多の表に入れる
+RELATIONS = [*LINK_FIELDS, "related"]
 
 
 def _check_link(source, target, relation):
@@ -408,6 +411,9 @@ def _check_link(source, target, relation):
     """
     if source.pk == target.pk:
         return False, "同じタスクです．"
+    if relation == "related":
+        reason = source.related_problem(target)
+        return reason is None, reason or ""
     field = LINK_FIELDS[relation]
     candidate = Task.objects.get(pk=source.pk)  # 保存しない「下書き」として読み直す
     setattr(candidate, field, target)
@@ -435,6 +441,11 @@ def _link_notes(source, target, relation):
     - サブタスクにすると分類が変わるとき：「分類：授業 → 研究（サブタスクもそろう）」
     """
     notes = []
+    # 🔗 でつながっている相手と 📁・🔒 でつなぐと、🔗 は外れる（線は1本だけ）
+    if relation != "related" and source.related.filter(pk=target.pk).exists():
+        notes.append("🔗 → 外れる（線は1本だけ）")
+    if relation == "related":
+        return notes
     if relation == "child":
         if source.parent_id and source.parent_id != target.pk:
             notes.append(f"⚠ 今：「{source.parent.title}」のサブタスク → 入れかえ")
@@ -455,7 +466,7 @@ def task_link_options(request, pk):
     source = get_object_or_404(request.user.tasks.select_related("parent", "prerequisite", "category"), pk=pk)
     target = _own_task_from_param(request, request.GET.get("target"))
     result = {"source": source.title, "target": target.title}
-    for relation in LINK_FIELDS:
+    for relation in RELATIONS:
         ok, reason = _check_link(source, target, relation)
         result[relation] = {"ok": ok, "reason": reason, "notes": _link_notes(source, target, relation) if ok else []}
     return JsonResponse(result)
@@ -468,12 +479,15 @@ def task_link(request, pk):
     source = get_object_or_404(request.user.tasks, pk=pk)
     target = _own_task_from_param(request, request.POST.get("target"))
     relation = request.POST.get("relation")
-    if relation not in LINK_FIELDS:
+    if relation not in RELATIONS:
         messages.error(request, "つなぎ方を選んでください．")
     else:
         ok, reason = _check_link(source, target, relation)
         if not ok:
             messages.error(request, reason)
+        elif relation == "related":
+            source.related.add(target)  # 向きがないので、target から見ても source とつながる
+            messages.success(request, f"「{source.title}」と「{target.title}」を 🔗 でつなぎました．")
         else:
             field = LINK_FIELDS[relation]
             setattr(source, field, target)
@@ -699,7 +713,8 @@ def task_map_room(request, key):
     category_id = category.pk if category else None
 
     # 自分のタスクを1回の問い合わせでまとめて読み、親子の形は Python の中で組み立てる
-    tasks = list(request.user.tasks.select_related("prerequisite"))
+    # prefetch_related("related")：🔗 の相手を、全部のタスクの分まとめて1回で読む
+    tasks = list(request.user.tasks.select_related("prerequisite").prefetch_related("related"))
     children = defaultdict(list)
     for task in tasks:
         if task.parent_id:
@@ -759,6 +774,8 @@ def task_map_room(request, key):
             # 線を引くのは、相手もこの部屋に出ているときだけ
             "parent": t.parent_id if t.parent_id in shown_ids else None,
             "prerequisite": t.prerequisite_id if t.prerequisite_id in shown_ids else None,
+            # 🔗 の相手（この部屋に出ている分だけ）。違う部屋の相手は、詳細画面にだけ出る
+            "related": [r.pk for r in t.related.all() if r.pk in shown_ids],
             # True：先にやること（同じ親の中のタスク）の先に描く。親との線は引かない
             "chained": t.pk in chained,
         }
@@ -903,9 +920,19 @@ def task_map_create(request):
 @login_required
 @require_POST
 def task_unlink(request, pk):
-    """マップの線を押して、つながり（親子・前後）を外す。タスクそのものは消さない。"""
+    """マップの線や詳細画面の ✕ で、つながり（親子・前後・🔗 関連）を外す。タスクそのものは消さない。"""
     task = get_object_or_404(request.user.tasks.select_related("parent", "prerequisite", "category"), pk=pk)
     relation = request.POST.get("relation")
+    if relation == "related":
+        # 🔗 は相手が何件もあるので、どの相手かを target で受け取る
+        target = request.POST.get("target", "")
+        other = task.related.filter(pk=target).first() if target.isdigit() else None
+        if other is None:
+            messages.error(request, "外すつながりがありません．")
+        else:
+            task.related.remove(other)
+            messages.success(request, f"「{task.title}」と「{other.title}」の 🔗 を外しました．")
+        return _redirect_next(request, "task_map")
     field = LINK_FIELDS.get(relation)
     other = getattr(task, field) if field else None
     if other is None:

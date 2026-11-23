@@ -6,7 +6,7 @@
 //   - 点を押す                → そのタスクの詳細画面へ
 //   - 点をなぞる              → 点を動かす（離したら置き場所をサーバーに保存）
 //   - 点の右の ● から別の点へ → 線を引いて「つなぎ方」を選ぶ（ホームのドラッグと同じ画面・同じルール）
-//   - 線を押す                → つなぎ方を切り替える（📁 ⇔ 🔒）か、つながりを外す
+//   - 線を押す                → つなぎ方を切り替える（📁 ⇔ 🔒）か、つながりを外す（🔗 は外すだけ）
 //   - ＋ タスク               → 名前・どのタスクに・つなぎ方を選んで足す（場所はサーバーが空いているところに決める）
 //   - 何もないところをなぞる  → ふつうのスクロールでマップを動かす
 //   - 縮小・全体・拡大        → 小さくする・全部が見える大きさ・大きくする
@@ -188,7 +188,7 @@
   );
 
   // ---- 線を描く ----
-  // relation："child"（from は to のサブタスク）／"after"（from は to が終わってから）
+  // relation："child"（from は to のサブタスク）／"after"（from は to が終わってから）／"related"（🔗 向きなし）
   const edges = [];
   nodes.forEach((node) => {
     // 先にやること（同じ親の中のタスク）の先に描くタスクは、親との線を引かない（🔒 の線だけでつながって見える）
@@ -198,6 +198,12 @@
     if (node.prerequisite && byId.has(node.prerequisite)) {
       edges.push({ relation: "after", from: node, to: byId.get(node.prerequisite) });
     }
+    // 🔗 は両方のタスクに相手が入っているので、番号の小さいほうからだけ引く（同じ線を2本描かない）
+    (node.related || []).forEach((otherId) => {
+      if (node.id < otherId && byId.has(otherId)) {
+        edges.push({ relation: "related", from: node, to: byId.get(otherId) });
+      }
+    });
   });
 
   const center = (node) => [node.x + node.w / 2, node.y + node.h / 2];
@@ -225,6 +231,7 @@
       const [x2, y2] = border(edge.from, center(edge.to));
       const group = svgElement("g", { class: "map-edge" });
       const isAfter = edge.relation === "after";
+      const isRelated = edge.relation === "related";
       // 📁（親子）はまっすぐ。🔒 は横にふくらませた曲線にして、親子の線と重ならないようにする
       // （曲がり具合を決める点（mx, my）を、線のまん中から直角の向きに、長さの 0.45 倍だけずらす）
       // ただし、親との線を引かないタスク（chained）への 🔒 は、重なる線がないのでまっすぐにする
@@ -236,15 +243,15 @@
         svgElement("path", { d, class: "map-edge-hit" }),
         svgElement("path", {
           d,
-          class: `map-edge-line${isAfter ? " is-after" : ""}`,
+          class: `map-edge-line${isAfter ? " is-after" : ""}${isRelated ? " is-related" : ""}`,
           ...(isAfter ? { "marker-end": "url(#map-arrow)" } : {}),
         }),
       );
-      // 📁 は親子の線すべてに付くとうるさいので、🔒（前後のつながり）にだけ印を付ける
-      if (isAfter) {
+      // 📁 は親子の線すべてに付くとうるさいので、🔒（前後）と 🔗（関連）にだけ印を付ける
+      if (isAfter || isRelated) {
         // 曲線のまん中（はじめ・曲がり具合の点・おわりの平均）に置く
         const label = svgElement("text", { x: (x1 + 2 * mx + x2) / 4, y: (y1 + 2 * my + y2) / 4, class: "map-edge-label" });
-        label.textContent = "🔒";
+        label.textContent = isAfter ? "🔒" : "🔗";
         group.append(label);
       }
       group.addEventListener("click", () => openUnlink(edge));
@@ -379,11 +386,15 @@
     if (suppressClick) return;
     const form = unlinkDialog.querySelector('form[method="post"]');
     form.querySelector('input[name="relation"]').value = edge.relation;
+    form.querySelector('input[name="target"]').value = edge.to.id; // 🔗 のとき、どの相手との線か
     const isChild = edge.relation === "child";
+    const isRelated = edge.relation === "related";
     const { from, to } = edge;
-    unlinkDialog.querySelector("[data-unlink-text]").textContent = isChild
-      ? `📁 「${from.title}」は「${to.title}」のサブタスク`
-      : `🔒 「${from.title}」は「${to.title}」が終わってから`;
+    unlinkDialog.querySelector("[data-unlink-text]").textContent = isRelated
+      ? `🔗 「${from.title}」と「${to.title}」は関連`
+      : isChild
+        ? `📁 「${from.title}」は「${to.title}」のサブタスク`
+        : `🔒 「${from.title}」は「${to.title}」が終わってから`;
 
     // 切り替えるボタン：📁 なら 🔒 に、🔒 なら 📁 に
     const relinkButton = unlinkDialog.querySelector("[data-relink-button]");
@@ -392,11 +403,14 @@
       ? `🔒 「${to.title}」が終わってからやる，に切り替える`
       : `📁 「${to.title}」のサブタスクにする，に切り替える`;
     relinkButton.disabled = false;
+    relinkButton.hidden = isRelated; // 🔗 は切り替えず、外すだけ
     unlinkDialog.querySelector("[data-relink-reason]").textContent = "";
 
     unlinkDialog.querySelector("[data-unlink-button]").formAction = urlFor(unlinkUrlTemplate, from.id);
     const parent = byId.get(from.parent);
-    unlinkDialog.querySelector("[data-unlink-note]").textContent = isChild
+    unlinkDialog.querySelector("[data-unlink-note]").textContent = isRelated
+      ? "どちらもタスクは消えない"
+      : isChild
       ? `外す → 「${from.title}」はこの部屋のいちばん上のタスクに（どちらもタスクは消えない）`
       : from.chained && parent
         ? `外す → 「${from.title}」は「${parent.title}」のサブタスクとして線でつながる（どちらもタスクは消えない）`

@@ -84,6 +84,10 @@ class Task(models.Model):
         related_name="dependents",  # 逆向き：このタスクが終わると進められるタスク
         verbose_name="先にやること",
     )
+    # 🔗 関連（Issue #43）：順番も中身も関係ないが、一緒に見たいタスクどうしのつながり。いくつでも付けられる。
+    # ManyToManyField：多対多（1つのタスクが、たくさんのタスクとつながれる）。つながりは別の表に1行ずつ入る。
+    # symmetrical=True：向きがない（A 🔗 B を付けると、B から見ても A 🔗 B）。タスクを消すと、その 🔗 も消える
+    related = models.ManyToManyField("self", symmetrical=True, blank=True, verbose_name="関連")
     # マインドマップ（Issue #30）の上での置き場所（左上の点の位置、px）。
     # まだマップで動かしていないタスクは空（None）のままで、マップの画面が自動で並べる
     map_x = models.FloatField("マップの横の位置", null=True, blank=True)
@@ -178,6 +182,24 @@ class Task(models.Model):
             seen.add(node.pk)
             node = node.prerequisite
 
+    def related_problem(self, other):
+        """other と 🔗 関連でつなげないときの理由を返す。つなげるなら None。
+
+        多対多のつながりは clean()（保存の前のチェック）では確かめられないので、ここにまとめる。
+        📁・🔒 で直接つながっている相手は、線が重なるので 🔗 にしない。
+        """
+        if other.pk == self.pk:
+            return "同じタスクです．"
+        if other.owner_id != self.owner_id:
+            return "他の人のタスクとはつなげません．"
+        if other.pk == self.parent_id or other.parent_id == self.pk:
+            return "📁 でつながっています．"
+        if other.pk == self.prerequisite_id or other.prerequisite_id == self.pk:
+            return "🔒 でつながっています．"
+        if self.related.filter(pk=other.pk).exists():
+            return "もう 🔗 でつながっています．"
+        return None
+
     @property
     def is_locked(self):
         """先にやることが終わっていないとき True（まだ取りかかれない）。"""
@@ -210,6 +232,10 @@ class Task(models.Model):
             .exclude(category_id=self.category_id)
             .update(category_id=self.category_id)
         )
+        # 📁・🔒 でつないだ相手とは 🔗 を外す（同じ2つのタスクを、2本の線でつながないため）
+        linked = [pk for pk in (self.parent_id, self.prerequisite_id) if pk is not None]
+        if linked:
+            self.related.remove(*linked)
 
     def due_status(self, now=None):
         """締切の状態を返す。画面で色を変えるのに使う。
