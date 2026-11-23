@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% load static %}
+{% comment %}
+  使い方（Issue #47）。iPhone の「ヒント」アプリのように、1枚に1つの機能を、横にスワイプして見ていく。
+  - 1枚＝<section class="guide-slide" data-chapter="章の名前" data-key="章の短い名前">。上に絵（.guide-art）、下に見出しと説明
+  - カードは章ごとに guide/_○○.html に分けて書く。/guide/#map のように開くと、その章の1枚目から
+  - 絵はスクリーンショットではなく、アプリと同じ部品（daisyUI）で作った小さな画面。画面を直しても撮り直さなくてよい
+  - 章のボタン・● ● ○（今何枚目か）・前へ／次へ は、guide.js が section から作る
+  - 絵は見せるだけ（aria-hidden・押せない）。説明は見出しと文で伝える
+{% endcomment %}
+
+{% block title %}使い方{% endblock %}
+
+{% block content %}
+  <div class="mb-3 flex items-center justify-between text-sm">
+    <a href="{% url 'help' %}" class="link">← ？ ヘルプ</a>
+    <h1 class="font-bold">使い方</h1>
+  </div>
+
+  <!-- 章のボタン（guide.js が作る）。押すと、その章の1枚目へ -->
+  <nav class="guide-chapters mb-3 flex gap-2 overflow-x-auto pb-1" aria-label="章" data-guide-chapters></nav>
+
+  <!-- カードを横に並べた帯。横にスクロールすると、1枚ずつピタッと止まる（scroll-snap） -->
+  <div class="guide-track" data-guide-track tabindex="0" aria-label="使い方のカード（左右にスワイプ）">
+
+    {% include "tasks/guide/_start.html" %}
+    {% include "tasks/guide/_tasks.html" %}
+    {% include "tasks/guide/_links.html" %}
+    {% include "tasks/guide/_map.html" %}
+    {% include "tasks/guide/_more.html" %}
+  </div>
+
+  <!-- 今何枚目か（guide.js が作る）。● を押すと、その1枚へ -->
+  <div class="mt-3 flex justify-center gap-2" data-guide-dots></div>
+
+  <div class="mt-3 flex items-center justify-between gap-2">
+    <button type="button" class="btn btn-ghost" data-guide-prev>← 前へ</button>
+    <button type="button" class="btn btn-primary" data-guide-next>次へ →</button>
+    <!-- 最後の1枚では「次へ」の代わりに出す -->
+    <a href="{% url 'home' %}" class="btn btn-primary" data-guide-done hidden>🏠 はじめる</a>
+  </div>
+
+  <style>
+    /* 帯：横に並べて、1枚ずつピタッと止める。スクロールバーは見せない */
+    .guide-track {
+      display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
+      scrollbar-width: none; overscroll-behavior-x: contain; border-radius: 1.5rem;
+    }
+    .guide-track::-webkit-scrollbar { display: none; }
+    .guide-track:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+    .guide-slide {
+      flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always;
+      display: flex; flex-direction: column; gap: 0.5rem; padding: 0 0.25rem 0.5rem;
+    }
+    /* 絵の場所：どのカードも同じ高さにして、見出しの位置をそろえる */
+    .guide-art {
+      position: relative; height: 17rem; border-radius: 1.5rem; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(160deg, color-mix(in oklab, var(--color-primary) 18%, var(--color-base-100)), color-mix(in oklab, var(--color-secondary) 12%, var(--color-base-100)));
+      pointer-events: none; user-select: none;
+    }
+    .guide-title { margin-top: 0.5rem; font-size: 1.25rem; font-weight: bold; }
+    .guide-text { font-size: 0.9375rem; color: color-mix(in oklab, var(--color-base-content) 75%, transparent); line-height: 1.7; }
+
+    /* 絵の中の下のメニュー（➕ を光らせる） */
+    .guide-dock {
+      position: absolute; left: 1.5rem; right: 1.5rem; bottom: 0.75rem; display: flex; justify-content: space-around;
+      padding: 0.35rem; border-radius: 1rem; background: var(--color-base-100); box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+    }
+    .guide-dock-on { border-radius: 0.5rem; padding: 0 0.5rem; background: color-mix(in oklab, var(--color-primary) 25%, transparent); animation: guide-blink 1.6s ease-in-out infinite; }
+
+    /* ●（今何枚目か） */
+    .guide-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; background: color-mix(in oklab, var(--color-base-content) 25%, transparent); transition: width 0.2s, background 0.2s; }
+    .guide-dot.is-on { width: 1.25rem; background: var(--color-primary); }
+
+    /* ---- 絵の動き（その1枚が見えているときだけ動かす：.is-active は guide.js が付ける） ---- */
+    .guide-slide:not(.is-active) .guide-art * { animation-play-state: paused; }
+    /* 下から順に出てくる */
+    .guide-pop { opacity: 0; animation: guide-pop 0.4s ease-out var(--d, 0s) forwards; }
+    .guide-slide:not(.is-active) .guide-pop { animation: none; opacity: 1; }
+    /* 文字を1文字ずつ打つ */
+    .guide-typing { display: inline-block; overflow: hidden; white-space: nowrap; border-right: 2px solid currentColor; width: 0; animation: guide-type 3.5s steps(6) infinite; }
+    /* ○ が ✓ に変わる */
+    .guide-check { animation: guide-check 3s ease-in-out infinite; }
+    .guide-check::after { content: "✓"; opacity: 0; animation: guide-check-mark 3s ease-in-out infinite; }
+
+    @keyframes guide-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes guide-type { 0%, 10% { width: 0; } 55%, 90% { width: 6.2em; } 100% { width: 0; } }
+    @keyframes guide-blink { 50% { background: color-mix(in oklab, var(--color-primary) 55%, transparent); } }
+    @keyframes guide-check { 0%, 35% { background: transparent; color: inherit; } 45%, 90% { background: var(--color-success); color: var(--color-success-content); border-color: var(--color-success); } 100% { background: transparent; } }
+    @keyframes guide-check-mark { 0%, 35% { opacity: 0; } 45%, 90% { opacity: 1; } 100% { opacity: 0; } }
+
+    /* ---- マップの絵（task_map.html の .map-node・.map-handle を小さくしたもの） ---- */
+    .gm-canvas {
+      position: relative; width: 16rem; height: 12rem; border-radius: 1rem; background-color: var(--color-base-100);
+      background-image: radial-gradient(circle, color-mix(in oklab, var(--color-base-content) 18%, transparent) 1px, transparent 1px);
+      background-size: 16px 16px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+    }
+    .gm-node {
+      position: absolute; width: 6.5rem; padding: 0.35rem 0.9rem 0.35rem 0.5rem; font-size: 0.6875rem; font-weight: bold;
+      border: 1px solid var(--color-base-300); border-left: 5px solid var(--color-base-300); border-radius: 0.6rem;
+      background: var(--color-base-100); box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+    }
+    .gm-node.importance-3 { border-left-color: var(--color-error); }
+    .gm-node.importance-2 { border-left-color: var(--color-warning); }
+    .gm-node.is-top { border-width: 2px 2px 2px 5px; border-top-color: var(--color-primary); border-right-color: var(--color-primary); border-bottom-color: var(--color-primary); }
+    .gm-node.is-locked { opacity: 0.75; }
+    .gm-handle {
+      position: absolute; right: -8px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%);
+      border-radius: 999px; background: var(--color-primary); border: 2px solid var(--color-base-100);
+    }
+    /* 指の場所（なぞる動きを見せる丸） */
+    .guide-finger {
+      position: absolute; width: 1.75rem; height: 1.75rem; margin: -0.875rem 0 0 -0.875rem; border-radius: 999px;
+      background: color-mix(in oklab, var(--color-base-content) 25%, transparent); border: 2px solid var(--color-base-100);
+      animation: guide-drag 3s ease-in-out infinite;
+    }
+
+    /* ---- そのほかの動き ---- */
+    .guide-press { animation: guide-press 2.4s ease-in-out infinite; }              /* ボタンを押す */
+    .guide-glow { animation: guide-glow 1.8s ease-in-out infinite; }                /* 押すところを光らせる */
+    /* 2つの文字を同じ場所に重ね、○ が ✓ になるのに合わせて入れかえる（🔒 まだ → ✔ 取りかかれる） */
+    .guide-swap { display: grid; }
+    .guide-swap > * { grid-area: 1 / 1; animation: guide-swap-a 3s ease-in-out infinite; }
+    .guide-swap > * + * { animation-name: guide-swap-b; }
+    .guide-draw { stroke-dasharray: 160; animation: guide-draw-line 3s ease-out infinite; } /* 線が伸びる */
+    .guide-drag { animation: guide-drag 3s ease-in-out infinite; }                  /* 点をなぞって動かす */
+    .guide-lift { animation: guide-lift 4s ease-in-out infinite; }                  /* カードを持ち上げて重ねる */
+    .guide-target { animation: guide-target 4s ease-in-out infinite; }
+    .guide-target-node { animation: guide-target 3s ease-in-out infinite; }
+    .guide-sheet { animation: guide-sheet 4s ease-in-out infinite; }                /* 選ぶ画面が下から出る */
+    .guide-place { animation: guide-place 3.5s ease-out infinite; }                 /* 棚から置いた点が出てくる */
+    .guide-hot { animation: guide-hot 2s ease-in-out infinite; }                    /* 押した線が赤くなる */
+    .guide-grow { animation: guide-grow 2.5s ease-out forwards; }                   /* 進み具合が伸びる */
+
+    @keyframes guide-press { 0%, 60%, 100% { transform: none; } 70% { transform: scale(0.92); box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-primary) 35%, transparent); } }
+    @keyframes guide-glow { 50% { box-shadow: 0 0 0 5px color-mix(in oklab, var(--color-primary) 35%, transparent); } }
+    @keyframes guide-swap-a { 0%, 40% { opacity: 1; } 45%, 90% { opacity: 0; } 100% { opacity: 1; } }
+    @keyframes guide-swap-b { 0%, 40% { opacity: 0; } 45%, 90% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes guide-draw-line { 0% { stroke-dashoffset: 160; } 60%, 100% { stroke-dashoffset: 0; } }
+    @keyframes guide-drag { 0%, 15% { transform: none; } 50%, 70% { transform: translate(-3rem, 2.5rem); } 100% { transform: none; } }
+    @keyframes guide-lift {
+      0%, 10% { transform: none; box-shadow: 0 1px 3px rgb(0 0 0 / 0.15); }
+      25% { transform: scale(1.05); box-shadow: 0 10px 20px rgb(0 0 0 / 0.25); }
+      45%, 80% { transform: translateY(2.75rem) scale(1.05); opacity: 0.85; box-shadow: 0 10px 20px rgb(0 0 0 / 0.25); }
+      100% { transform: none; }
+    }
+    @keyframes guide-target { 0%, 40%, 85%, 100% { outline: 0 solid transparent; } 45%, 80% { outline: 3px solid var(--color-primary); outline-offset: 2px; } }
+    @keyframes guide-sheet { 0%, 50% { opacity: 0; transform: translateY(1rem); } 60%, 90% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+    @keyframes guide-place { 0%, 30% { opacity: 0; transform: translateY(3rem) scale(0.9); } 55%, 100% { opacity: 1; transform: none; box-shadow: 0 0 0 4px var(--color-accent); } }
+    @keyframes guide-hot { 0%, 30% { stroke: currentColor; } 50%, 100% { stroke: var(--color-error); opacity: 1; } }
+    @keyframes guide-grow { from { width: 0; } }
+
+    /* 「動きを減らす」設定の人には、動かさずに出来上がりの形で見せる */
+    @media (prefers-reduced-motion: reduce) {
+      .guide-track { scroll-behavior: auto; }
+      .guide-art * { animation: none !important; opacity: 1 !important; }
+      .guide-typing { width: auto; border-right: 0; }
+      .guide-swap > :first-child { opacity: 0 !important; }  /* 動かさないときは、終わったあとの形だけ */
+    }
+  </style>
+  <script src="{% static 'tasks/guide.js' %}" defer></script>
+{% endblock %}

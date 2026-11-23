@@ -19,7 +19,8 @@ class SignUpView(CreateView):
 
     form_class = SignUpForm
     template_name = "registration/signup.html"
-    success_url = reverse_lazy("home")
+    # 登録した直後に1回だけ、使い方（Issue #47）を開く。見終わったら「🏠 はじめる」でホームへ
+    success_url = reverse_lazy("guide")
 
     def dispatch(self, request, *args, **kwargs):
         # 本番で招待コードが決まっていないときは、新規登録を止める（フォームを出さず、送られても作らない）

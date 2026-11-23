@@ -1,0 +1,90 @@
+{# 使い方：マップ（部屋と棚・点の動かし方・● から線・線を押す・＋ タスクと大きさ） #}
+{# 点（.gm-node）・●（.gm-handle）・線は、マップの画面（task_map.html）と同じ見た目を小さくしたもの #}
+<section class="guide-slide" data-chapter="マップ" data-key="map">
+  <div class="guide-art" aria-hidden="true">
+    <div class="flex w-64 flex-col gap-2">
+      <div class="flex gap-1">
+        <span class="select select-sm min-w-0 flex-1">🗺️ 研究（3）</span>
+        <span class="btn btn-outline btn-square btn-sm">⚙️</span>
+      </div>
+      <div class="gm-canvas">
+        <div class="gm-node is-top importance-3" style="left: 0.5rem; top: 0.75rem">卒業研究</div>
+        <div class="gm-node" style="left: 8.5rem; top: 0.75rem">文献調査</div>
+        <div class="gm-node guide-place is-top" style="left: 0.5rem; top: 5.5rem">論文を読む</div>
+        <span class="guide-glow btn btn-sm absolute bottom-2 right-2">📦 1</span>
+      </div>
+    </div>
+  </div>
+  <h2 class="guide-title">🗺️ 部屋と 📦 棚</h2>
+  <p class="guide-text">部屋 ＝ 分類（上で切り替え）<br>📦 → 置く ／ しまう（タスクは消えない）</p>
+</section>
+
+<section class="guide-slide" data-chapter="マップ" data-key="map">
+  <div class="guide-art" aria-hidden="true">
+    <div class="gm-canvas w-64">
+      <div class="gm-node is-top importance-3" style="left: 0.5rem; top: 1rem">卒業研究</div>
+      <div class="gm-node guide-drag" style="left: 8rem; top: 5rem">文献調査<span class="gm-handle"></span></div>
+      <span class="guide-finger" style="left: 13.25rem; top: 6.25rem"></span>
+    </div>
+  </div>
+  <h2 class="guide-title">👆 点を動かす・開く</h2>
+  <p class="guide-text">点をなぞる → 動かす ／ 押す → 詳細<br>何もないところ → マップを動かす</p>
+</section>
+
+<section class="guide-slide" data-chapter="マップ" data-key="map">
+  <div class="guide-art" aria-hidden="true">
+    <div class="gm-canvas w-64">
+      <svg class="absolute inset-0 h-full w-full" viewBox="0 0 256 192">
+        <line class="guide-draw" x1="118" y1="38" x2="150" y2="140" stroke="var(--color-primary)" stroke-width="3" stroke-dasharray="4 4" />
+      </svg>
+      <div class="gm-node" style="left: 0.5rem; top: 1rem">発表スライド<span class="gm-handle"></span></div>
+      <div class="gm-node guide-target-node importance-2" style="left: 7.5rem; top: 8rem">実験</div>
+    </div>
+  </div>
+  <h2 class="guide-title">● から線を引く</h2>
+  <p class="guide-text">点の右の ● → 別の点まで引く<br>→ 📁・🔒・🔗 から選ぶ</p>
+</section>
+
+<section class="guide-slide" data-chapter="マップ" data-key="map">
+  <div class="guide-art" aria-hidden="true">
+    <div class="flex w-64 flex-col gap-2">
+      <div class="gm-canvas" style="height: 7rem">
+        <svg class="absolute inset-0 h-full w-full" viewBox="0 0 256 112">
+          <line x1="108" y1="30" x2="140" y2="30" stroke="currentColor" stroke-width="2.5" opacity="0.55" />
+          <path class="guide-hot" d="M 112 40 Q 128 80 150 82" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="6 5" opacity="0.7" />
+        </svg>
+        <div class="gm-node is-top" style="left: 0.5rem; top: 0.6rem">卒業研究</div>
+        <div class="gm-node" style="left: 8.75rem; top: 0.6rem">文献調査</div>
+        <div class="gm-node is-locked" style="left: 9.25rem; top: 4rem">🔒 考察</div>
+      </div>
+      <div class="flex flex-col gap-1 rounded-xl bg-base-100 p-2 text-xs shadow-lg">
+        <span class="rounded bg-base-200 px-2 py-1">📁 ⇔ 🔒 切り替える</span>
+        <span class="rounded border border-error px-2 py-1 text-center text-error">つながりを外す</span>
+      </div>
+    </div>
+  </div>
+  <h2 class="guide-title">線を押す</h2>
+  <p class="guide-text">━ 📁 ／ ┅▶ 🔒 ／ ⋯ 🔗<br>押す → 切り替え・外す（タスクは消えない）</p>
+</section>
+
+<section class="guide-slide" data-chapter="マップ" data-key="map">
+  <div class="guide-art" aria-hidden="true">
+    <div class="flex w-64 flex-col gap-2">
+      <div class="guide-mini card bg-base-100 shadow">
+        <div class="card-body gap-1 p-3 text-xs">
+          <span class="font-bold">＋ タスク</span>
+          <span class="input input-xs w-full">アンケートを作る</span>
+          <span class="select select-xs w-full">どこに：卒業研究</span>
+          <span class="opacity-70">📁 中に入れる ・ 🔒 終わってから</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-1">
+        <span class="guide-glow btn btn-primary btn-sm">＋ タスク</span>
+        <span class="btn btn-sm">📦</span>
+        <span class="join ms-auto"><span class="btn join-item btn-sm">縮小</span><span class="btn join-item btn-sm">全体</span><span class="btn join-item btn-sm">拡大</span></span>
+      </div>
+    </div>
+  </div>
+  <h2 class="guide-title">＋ タスク・大きさ</h2>
+  <p class="guide-text">＋ タスク → 名前・どこに・つなぎ方<br>全体 → 全部が見える大きさ</p>
+</section>

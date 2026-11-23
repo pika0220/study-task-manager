@@ -1075,3 +1075,32 @@ def progress(request):
         "tasks/progress.html",
         {"overall": overall, "categories": categories, "main_tasks": main_tasks},
     )
+
+
+# ---- 使い方（Issue #47）----
+
+
+# 使い方の章（guide/_○○.html の data-key と同じ）。ヘルプの画面に、章ごとのリンクとして並べる
+GUIDE_CHAPTERS = [
+    ("start", "はじめに", "➕ 足す・✔ 完了・締切の色"),
+    ("tasks", "タスク", "✏️ 詳細と編集・🏷️ 分類"),
+    ("links", "つながり", "📁 サブタスク・🔒 終わってから・🔗 関連"),
+    ("map", "マップ", "🗺️ 部屋・📦 棚・● から線"),
+    ("more", "資料・進み具合", "📎 資料・📊 進み具合"),
+]
+
+
+@login_required
+def guide(request):
+    """使い方のページ。1枚に1つの機能を、横にスワイプして見ていく（動きは guide.js）。
+
+    登録した直後に1回開く（accounts.views.SignUpView）。そのあとは ？ → ヘルプ から。
+    中身（カード）は guide.html と guide/_○○.html に書いてある。
+    """
+    return render(request, "tasks/guide.html")
+
+
+@login_required
+def help_page(request):
+    """ヘルプ（上のバーの ？）。使い方（章ごと）と、記号の一覧。"""
+    return render(request, "tasks/help.html", {"chapters": GUIDE_CHAPTERS})

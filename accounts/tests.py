@@ -18,7 +18,7 @@ class AccountFlowTests(TestCase):
             reverse("signup"),
             {"username": "kango", "password1": self.password, "password2": self.password},
         )
-        self.assertRedirects(response, reverse("home"))
+        self.assertRedirects(response, reverse("guide"))
         self.assertTrue(get_user_model().objects.filter(username="kango").exists())
         # 登録した直後からログインした状態になっている
         home = self.client.get(reverse("home"))
@@ -88,7 +88,7 @@ class InviteCodeTests(TestCase):
     @override_settings(INVITE_CODE="sakura-2026")
     def test_right_code_creates_the_user(self):
         response = self.signup(invite_code=" sakura-2026 ")  # 前後の空白は気にしない
-        self.assertRedirects(response, reverse("home"))
+        self.assertRedirects(response, reverse("guide"))
         self.assertTrue(self.user_exists())
 
     @override_settings(INVITE_CODE="", SIGNUP_WITHOUT_INVITE=False)
@@ -102,4 +102,4 @@ class InviteCodeTests(TestCase):
     @override_settings(INVITE_CODE="", SIGNUP_WITHOUT_INVITE=True)
     def test_development_needs_no_code(self):
         self.assertNotContains(self.client.get(reverse("signup")), "招待コード")
-        self.assertRedirects(self.signup(), reverse("home"))
+        self.assertRedirects(self.signup(), reverse("guide"))
