@@ -28,6 +28,9 @@ urlpatterns = [
     # 棚から部屋に置く・部屋から棚にしまう
     path("tasks/<int:pk>/place/", views.task_map_place, name="task_map_place"),
     path("tasks/<int:pk>/stow/", views.task_map_stow, name="task_map_stow"),
+    # 使い方（Issue #47）
+    path("guide/", views.guide, name="guide"),
+    path("help/", views.help_page, name="help"),
     # 進み具合（F-06）
     path("progress/", views.progress, name="progress"),
     # 資料（プログラムの中の名前は source）

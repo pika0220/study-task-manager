@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% comment %}
+  ヘルプ（Issue #47）。上のバーの ？ から開く。
+  - 📖 使い方：最初から、または章ごとに（/guide/#map のように開くと、その章から）
+  - 🔣 記号の一覧：アプリの中で使っている記号と意味
+{% endcomment %}
+
+{% block title %}ヘルプ{% endblock %}
+
+{% block content %}
+  <div class="mb-3 text-sm"><a href="{% url 'home' %}" class="link">← ホーム</a></div>
+  <h1 class="mb-4 text-xl font-bold">？ ヘルプ</h1>
+
+  <h2 class="mb-2 font-bold">📖 使い方</h2>
+  <a href="{% url 'guide' %}" class="btn btn-primary btn-block mb-2 min-h-12">📖 最初から見る</a>
+  <ul class="menu mb-6 w-full rounded-box bg-base-100 p-1 shadow-sm">
+    {% for key, name, summary in chapters %}
+      <li>
+        <a href="{% url 'guide' %}#{{ key }}" class="flex min-h-12 flex-col items-start gap-0">
+          <span class="font-bold">{{ name }}</span>
+          <span class="text-xs text-base-content/60">{{ summary }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <h2 class="mb-2 font-bold">🔣 記号の一覧</h2>
+  <div class="overflow-hidden rounded-box bg-base-100 shadow-sm">
+    <table class="table table-sm">
+      <tbody>
+        <tr><th class="w-16 text-center text-lg">📁</th><td>サブタスク（3段まで）</td></tr>
+        <tr><th class="text-center text-lg">🔒</th><td>先のタスクが終わってから取りかかる</td></tr>
+        <tr><th class="text-center text-lg">🔗</th><td>関連（順番なし）</td></tr>
+        <tr><th class="text-center text-lg">✔</th><td>完了</td></tr>
+        <tr><th class="text-center text-lg">⚠</th><td>期限切れ</td></tr>
+        <tr><th class="text-center text-lg">⏳</th><td>残り（まだ終わっていない）</td></tr>
+        <tr><th class="text-center text-lg">📎</th><td>資料（写真・リンク・メモ）</td></tr>
+        <tr><th class="text-center text-lg">🗺️</th><td>マップ（部屋 ＝ 分類）</td></tr>
+        <tr><th class="text-center text-lg">📦</th><td>棚（マップにまだ置いていないタスク）</td></tr>
+        <tr><th class="text-center text-lg">●</th><td>マップの点の右：線を引く</td></tr>
+        <tr><th class="text-center text-lg">⚙️</th><td>分類の管理</td></tr>
+        <tr><th class="text-center">━</th><td>マップの線：📁 サブタスク</td></tr>
+        <tr><th class="text-center">┅▶</th><td>マップの線：🔒 先 → あと</td></tr>
+        <tr><th class="text-center">⋯</th><td>マップの線：🔗 関連</td></tr>
+        <tr><th class="text-center"><span class="inline-block h-4 w-1.5 rounded bg-error align-middle"></span> <span class="inline-block h-4 w-1.5 rounded bg-warning align-middle"></span> <span class="inline-block h-4 w-1.5 rounded bg-base-300 align-middle"></span></th><td>カードの左の線：重要度 高・中・低</td></tr>
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

@@ -1,5 +1,6 @@
 import io
 import math
+import re
 import shutil
 import tempfile
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from PIL import Image
 from pathlib import Path
 
 from .models import Source, Task
+from .views import GUIDE_CHAPTERS
 
 
 class HomeViewTests(TestCase):
@@ -1755,3 +1757,47 @@ class RelatedLinkTests(TestCase):
 
     def test_link_dialog_offers_related(self):
         self.assertContains(self.client.get(reverse("home")), 'value="related"')
+
+
+class GuideTests(TestCase):
+    """使い方とヘルプ（Issue #47）。"""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("student", password="test-pass-123")
+
+    def test_guide_and_help_need_login(self):
+        for name in ("guide", "help"):
+            with self.subTest(name=name):
+                url = reverse(name)
+                self.assertRedirects(self.client.get(url), f"{reverse('login')}?next={url}")
+        # ログインしていない画面には ？ を出さない
+        self.assertNotContains(self.client.get(reverse("login")), f'href="{reverse("help")}"')
+
+    def test_guide_has_cards_for_every_chapter(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("guide"))
+        self.assertTemplateUsed(response, "tasks/guide.html")
+        self.assertContains(response, "tasks/guide.js")
+        html = response.content.decode()
+        slides = html.split('<section class="guide-slide"')[1:]
+        self.assertGreaterEqual(len(slides), 15)
+        keys = set()
+        for slide in slides:
+            # どのカードにも、章・絵（読み上げない）・見出しがある
+            match = re.match(r' data-chapter="[^"]+" data-key="([a-z]+)"', slide)
+            self.assertIsNotNone(match, slide[:80])
+            keys.add(match.group(1))
+            self.assertIn('class="guide-art" aria-hidden="true"', slide)
+            self.assertIn('class="guide-title"', slide)
+        # ヘルプの章のリンク（/guide/#map など）は、どれも本当にある章を指す
+        self.assertEqual(keys, {key for key, _, _ in GUIDE_CHAPTERS})
+
+    def test_help_links_to_each_chapter_and_lists_symbols(self):
+        self.client.force_login(self.user)
+        # 上のバーの ？ からヘルプへ
+        self.assertContains(self.client.get(reverse("home")), f'href="{reverse("help")}"')
+        response = self.client.get(reverse("help"))
+        self.assertContains(response, f'href="{reverse("guide")}"')
+        self.assertContains(response, f'href="{reverse("guide")}#map"')
+        for symbol in ("📁", "🔒", "🔗", "📦", "⚠"):
+            self.assertContains(response, symbol)

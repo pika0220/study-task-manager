@@ -1,0 +1,73 @@
+{# 使い方：はじめに（ようこそ・➕ 足す・✔ 完了と締切の色） #}
+<section class="guide-slide" data-chapter="はじめに" data-key="start">
+  <div class="guide-art" aria-hidden="true">
+    <div class="guide-mini card w-64 border-l-8 border-error bg-base-100 shadow">
+      <div class="card-body gap-2 p-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-bold">卒業研究</span>
+          <span class="badge badge-error badge-xs">重要度 高</span>
+        </div>
+        <div class="text-xs text-base-content/70">▼ 📁 サブタスク 3件</div>
+        <ul class="flex flex-col gap-1 border-l-2 border-base-300 pl-2 text-xs">
+          <li class="guide-pop" style="--d: 0.2s">✓ <span class="line-through opacity-60">文献調査</span></li>
+          <li class="guide-pop" style="--d: 0.6s">○ 実験</li>
+          <li class="guide-pop" style="--d: 1s">🔒 発表スライド</li>
+        </ul>
+        <progress class="progress progress-primary h-1.5 w-full" value="33" max="100"></progress>
+      </div>
+    </div>
+  </div>
+  <h2 class="guide-title">大きな課題を，小さく分けて進める</h2>
+  <p class="guide-text">📁 分ける → 🔒 順番をつける → 📊 進み具合を見る</p>
+</section>
+
+<section class="guide-slide" data-chapter="はじめに" data-key="start">
+  <div class="guide-art" aria-hidden="true">
+    <div class="guide-mini card mb-12 w-64 bg-base-100 shadow">
+      <div class="card-body gap-2 p-3">
+        <span class="text-xs font-bold">タイトル</span>
+        <div class="input input-sm w-full"><span class="guide-typing">実習レポート</span></div>
+        <div class="flex flex-col gap-1 opacity-40">
+          <span class="text-xs">締切 ・ 重要度 ・ 分類 ・ メモ</span>
+          <div class="input input-sm w-full"></div>
+        </div>
+        <span class="btn btn-primary btn-sm">登録する</span>
+      </div>
+    </div>
+    <div class="guide-dock">
+      <span>🏠</span><span class="guide-dock-on">➕</span><span>🗺️</span><span>📊</span>
+    </div>
+  </div>
+  <h2 class="guide-title">➕ タスクを足す</h2>
+  <p class="guide-text">下の ➕ 追加 → タイトルだけで OK<br>（締切・重要度・分類は あとからでも）</p>
+</section>
+
+<section class="guide-slide" data-chapter="はじめに" data-key="start">
+  <div class="guide-art" aria-hidden="true">
+    <div class="flex w-64 flex-col gap-2">
+      <div class="guide-mini card border-l-8 border-warning bg-base-100 shadow">
+        <div class="card-body flex-row items-center gap-2 p-2">
+          <span class="guide-check btn btn-circle btn-outline btn-xs"></span>
+          <span class="flex-1 text-sm font-bold">実習レポート</span>
+          <span class="badge badge-error badge-xs">期限切れ</span>
+        </div>
+      </div>
+      <div class="guide-mini card border-l-8 border-error bg-base-100 shadow">
+        <div class="card-body flex-row items-center gap-2 p-2">
+          <span class="btn btn-circle btn-outline btn-xs"></span>
+          <span class="flex-1 text-sm font-bold">小テスト</span>
+          <span class="badge badge-warning badge-xs">今日</span>
+        </div>
+      </div>
+      <div class="guide-mini card border-l-8 border-base-300 bg-base-100 shadow">
+        <div class="card-body flex-row items-center gap-2 p-2">
+          <span class="btn btn-circle btn-outline btn-xs"></span>
+          <span class="flex-1 text-sm font-bold">本を返す</span>
+          <span class="text-xs text-base-content/60">12/1</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <h2 class="guide-title">✔ 終わったら ○ を押す</h2>
+  <p class="guide-text">赤 ＝ 期限切れ ・ 黄 ＝ 今日<br>左の線の色 ＝ 重要度（赤 高・黄 中・灰 低）</p>
+</section>
