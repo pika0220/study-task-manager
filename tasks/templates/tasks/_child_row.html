@@ -16,7 +16,7 @@
 
   <div class="flex min-w-0 flex-1 flex-col gap-1">
     <div class="flex min-h-11 flex-wrap items-center gap-x-2 text-base">
-      <a href="{% url 'task_detail' task.pk %}"
+      <a href="{% url 'task_detail' task.pk %}{{ back_query }}"
          class="break-words py-2 hover:underline {% if task.is_done %}text-base-content/50 line-through{% endif %}">{{ task.title }}</a>
       {% if task.is_locked and not task.is_done %}
         <span class="text-xs text-base-content/60" title="「{{ task.prerequisite.title }}」が終わってから">🔒</span>

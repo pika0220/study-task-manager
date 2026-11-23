@@ -24,7 +24,7 @@
       <div class="flex items-start justify-between gap-2">
         <!-- タイトルを押すと詳細画面へ -->
         <h2 class="break-words text-base font-bold {% if task.is_done %}line-through{% endif %}">
-          <a href="{% url 'task_detail' task.pk %}" class="hover:underline">{{ task.title }}</a>
+          <a href="{% url 'task_detail' task.pk %}{{ back_query }}" class="hover:underline">{{ task.title }}</a>
         </h2>
         <span class="badge badge-sm shrink-0
           {% if task.importance == 3 %}badge-error{% elif task.importance == 2 %}badge-warning{% else %}badge-ghost{% endif %}">

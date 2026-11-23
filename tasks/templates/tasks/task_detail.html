@@ -4,9 +4,11 @@
 {% block title %}{{ task.title }}{% endblock %}
 
 {% block content %}
-  <!-- 戻り先：親タスクがあれば親の詳細、なければホーム -->
+  <!-- 戻り先：マップ・進み具合から来たときはそこ（back）。そうでなければ、上のタスクの詳細かホーム -->
   <div class="mb-3 text-sm">
-    {% if task.parent %}
+    {% if back %}
+      <a href="{{ back.url }}" class="link">← {{ back.label }}</a>
+    {% elif task.parent %}
       <a href="{% url 'task_detail' task.parent.pk %}" class="link">← {{ task.parent.title }}</a>
     {% else %}
       <a href="{% url 'home' %}" class="link">← ホーム</a>
@@ -53,7 +55,7 @@
             {% if task.is_done %}未完了に戻す{% else %}完了にする{% endif %}
           </button>
         </form>
-        <a href="{% url 'task_update' task.pk %}" class="btn flex-1">編集</a>
+        <a href="{% url 'task_update' task.pk %}{{ back_query }}" class="btn flex-1">編集</a>
       </div>
     </div>
   </div>
@@ -65,7 +67,7 @@
       <p>
         📁
         {% if task.parent %}
-          「<a href="{% url 'task_detail' task.parent.pk %}" class="link">{{ task.parent.title }}</a>」のサブタスク
+          「<a href="{% url 'task_detail' task.parent.pk %}{{ back_query }}" class="link">{{ task.parent.title }}</a>」のサブタスク
         {% else %}
           <span class="text-base-content/60">いちばん上のタスク</span>
         {% endif %}
@@ -80,7 +82,7 @@
           <div class="flex flex-col gap-1">
             <span class="text-base-content/60">先にやること</span>
             {% if task.prerequisite %}
-              <a href="{% url 'task_detail' task.prerequisite.pk %}"
+              <a href="{% url 'task_detail' task.prerequisite.pk %}{{ back_query }}"
                  class="block break-words rounded-lg border border-base-300 px-2 py-2 hover:bg-base-200 {% if task.prerequisite.is_done %}text-base-content/50 line-through{% endif %}">
                 {{ task.prerequisite.title }}
               </a>
@@ -98,7 +100,7 @@
           <div class="flex flex-col gap-1">
             <span class="text-base-content/60">次にやること</span>
             {% for next in task.dependents.all %}
-              <a href="{% url 'task_detail' next.pk %}" class="block break-words rounded-lg border border-base-300 px-2 py-2 hover:bg-base-200">{{ next.title }}</a>
+              <a href="{% url 'task_detail' next.pk %}{{ back_query }}" class="block break-words rounded-lg border border-base-300 px-2 py-2 hover:bg-base-200">{{ next.title }}</a>
             {% empty %}
               <span class="text-base-content/40">なし</span>
             {% endfor %}
@@ -137,6 +139,7 @@
           <form method="post" action="{% url 'source_delete' source.pk %}" class="shrink-0"
                 onsubmit="return confirm('この資料を消しますか？{% if source.photo %}写真も消えます．{% endif %}')">
             {% csrf_token %}
+            {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
             <button type="submit" class="btn btn-ghost btn-sm min-h-11 text-error">消す</button>
           </form>
         </div>
@@ -151,6 +154,7 @@
         <!-- enctype="multipart/form-data"：ファイル（写真）を送るフォームに必要な設定 -->
         <form method="post" action="{% url 'source_create' task.pk %}" enctype="multipart/form-data" class="flex flex-col gap-1">
           {% csrf_token %}
+          {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
           {% with form=source_form %}
             {% include "partials/form_fields.html" %}
           {% endwith %}
@@ -164,7 +168,7 @@
   <div class="mt-6 mb-3 flex items-center justify-between gap-2">
     <h2 class="text-lg font-bold">📁 サブタスク（{{ task.children.all|length }}件）</h2>
     {% if can_add_child %}
-      <a href="{% url 'task_create_child' task.pk %}" class="btn btn-primary btn-sm">＋ サブタスク</a>
+      <a href="{% url 'task_create_child' task.pk %}{{ back_query }}" class="btn btn-primary btn-sm">＋ サブタスク</a>
     {% endif %}
   </div>
 

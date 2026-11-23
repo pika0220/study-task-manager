@@ -3,6 +3,7 @@ import math
 import shutil
 import tempfile
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -948,7 +949,11 @@ class MindMapTests(TestCase):
         self.assertEqual(nodes["文献調査"]["parent"], self.study.pk)
         self.assertEqual(nodes["発表スライド"]["prerequisite"], self.reading.pk)
         self.assertTrue(nodes["発表スライド"]["locked"])
-        self.assertEqual(nodes["卒業研究"]["url"], reverse("task_detail", args=[self.study.pk]))
+        # 詳細画面の「←」でこの部屋に戻れるように、戻り先（back）が付いている
+        self.assertEqual(
+            nodes["卒業研究"]["url"],
+            reverse("task_detail", args=[self.study.pk]) + "?" + urlencode({"back": self.room_url()}),
+        )
 
     def test_room_menu_lists_categories_with_counts(self):
         response = self.get_room()
@@ -1526,3 +1531,99 @@ class TaskModelTests(TestCase):
         self.assertEqual(task.due_status(now), "soon")
         task.due_at = now + timedelta(days=10)
         self.assertEqual(task.due_status(now), "later")
+
+
+class BackNavigationTests(TestCase):
+    """来た画面に戻る（Issue #41）。?back= で運んだ戻り先を、詳細・編集・サブタスク・資料・分類のあとも保つ。"""
+
+    def setUp(self):
+        self.me = get_user_model().objects.create_user("student", password="test-pass-123")
+        self.research = self.me.categories.get(name="研究")
+        self.study = Task.objects.create(owner=self.me, title="卒業研究", category=self.research, on_map=True)
+        self.reading = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        self.client.force_login(self.me)
+        self.room = reverse("task_map_room", args=[self.research.pk])
+        self.detail = reverse("task_detail", args=[self.study.pk])
+
+    def back(self, path=None):
+        return "?" + urlencode({"back": path or self.room})
+
+    def test_map_nodes_link_to_detail_with_back(self):
+        nodes = self.client.get(self.room).context["nodes"]
+        self.assertEqual(nodes[0]["url"], self.detail + self.back())
+
+    def test_detail_from_map_goes_back_to_map_and_highlights_the_task(self):
+        response = self.client.get(self.detail + self.back())
+        self.assertEqual(response.context["back"], {"url": f"{self.room}?focus={self.study.pk}", "label": "🗺️ マップ"})
+        self.assertContains(response, "← 🗺️ マップ")
+        self.assertNotContains(response, "← ホーム")
+        # 編集・＋ サブタスク・サブタスクのカードにも、戻り先を付けたままにする
+        self.assertContains(response, reverse("task_update", args=[self.study.pk]) + self.back())
+        self.assertContains(response, reverse("task_create_child", args=[self.study.pk]) + self.back())
+        self.assertContains(response, reverse("task_detail", args=[self.reading.pk]) + self.back())
+
+    def test_detail_without_back_works_as_before(self):
+        self.assertContains(self.client.get(self.detail), "← ホーム")
+        self.assertContains(self.client.get(reverse("task_detail", args=[self.reading.pk])), "← 卒業研究")
+
+    def test_unsafe_or_unknown_back_is_ignored(self):
+        for bad in ["https://evil.example.com/", "//evil.example.com/map/room/1/", "/admin/", "/tasks/1/", "map/room/1/", "/nothing/"]:
+            response = self.client.get(self.detail + "?" + urlencode({"back": bad}))
+            self.assertIsNone(response.context["back"], bad)
+            self.assertEqual(response.context["back_query"], "", bad)
+            self.assertContains(response, "← ホーム")
+
+    def test_back_keeps_only_the_path(self):
+        response = self.client.get(self.detail + self.back(self.room + "?focus=999&x=1"))
+        self.assertEqual(response.context["back_path"], self.room)
+
+    def test_edit_keeps_back_after_saving_and_cancel(self):
+        url = reverse("task_update", args=[self.study.pk]) + self.back()
+        response = self.client.get(url)
+        self.assertEqual(response.context["cancel_url"], self.detail + self.back())
+        self.assertContains(response, f'name="back" value="{self.room}"')
+        response = self.client.post(url, {"title": "卒業研究（本番）", "importance": 2, "category": self.research.pk})
+        self.assertRedirects(response, self.detail + self.back())
+
+    def test_edit_form_back_field_also_works(self):
+        # アドレスに back がなくても、フォームの中の back（hidden）で戻り先がわかる
+        response = self.client.post(
+            reverse("task_update", args=[self.study.pk]),
+            {"title": "卒業研究", "importance": 2, "category": self.research.pk, "back": self.room},
+        )
+        self.assertRedirects(response, self.detail + self.back())
+
+    def test_adding_a_subtask_returns_with_back(self):
+        url = reverse("task_create_child", args=[self.study.pk]) + self.back()
+        self.assertEqual(self.client.get(url).context["cancel_url"], self.detail + self.back())
+        response = self.client.post(url, {"title": "構成を考える", "parent": self.study.pk, "importance": 2})
+        self.assertRedirects(response, self.detail + self.back())
+
+    def test_sources_return_with_back(self):
+        response = self.client.post(
+            reverse("source_create", args=[self.study.pk]), {"kind": "paper", "memo": "プリント", "back": self.room}
+        )
+        self.assertRedirects(response, self.detail + self.back())
+        source = self.study.sources.get()
+        response = self.client.post(reverse("source_delete", args=[source.pk]), {"back": self.room})
+        self.assertRedirects(response, self.detail + self.back())
+
+    def test_toggle_on_detail_returns_to_the_same_detail(self):
+        response = self.client.post(
+            reverse("task_toggle", args=[self.reading.pk]), {"next": self.detail + self.back()}
+        )
+        self.assertRedirects(response, self.detail + self.back())
+
+    def test_progress_links_carry_back(self):
+        response = self.client.get(reverse("progress"))
+        self.assertContains(response, self.detail + "?back=%2Fprogress%2F")
+        detail = self.client.get(self.detail + "?back=%2Fprogress%2F")
+        self.assertEqual(detail.context["back"], {"url": "/progress/", "label": "📊 進み具合"})
+
+    def test_category_page_from_map_goes_back_to_map(self):
+        self.assertContains(self.client.get(self.room), reverse("category_list") + "?back=" + self.room.replace("/", "%2F"))
+        url = reverse("category_list") + self.back()
+        self.assertContains(self.client.get(url), "← 🗺️ マップ")
+        response = self.client.post(reverse("category_create"), {"name": "部活", "back": self.room})
+        self.assertRedirects(response, url)
+        self.assertContains(self.client.get(reverse("category_list")), "← ホーム")

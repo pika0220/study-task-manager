@@ -1,6 +1,7 @@
 import math
 from collections import defaultdict
 from datetime import timedelta
+from urllib.parse import urlencode, urlsplit
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -10,7 +11,7 @@ from django.db.models import Count, Q
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
+from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
@@ -18,6 +19,65 @@ from django.views.generic import CreateView, DetailView, UpdateView
 
 from .forms import SourceForm, TaskForm
 from .models import Category, Source, Task
+
+
+# ---- 戻り先（Issue #41）----
+# 画面を移るときに「どこから来たか」を ?back=/map/room/4/ のようにアドレスに付けて運ぶ。
+# 詳細画面の「←」は back があればそこへ戻る。編集・サブタスクの追加・資料のあとも back を付けたまま戻るので、
+# マップから開いたタスクを編集しても、← でマップに戻れる。
+
+# back にできる画面と、「←」に出す名前。ここにない画面のアドレスは使わない
+BACK_LABELS = {
+    "home": "ホーム",  # back がないときの「← ホーム」と同じ書き方
+    "task_map_room": "🗺️ マップ",
+    "progress": "📊 進み具合",
+}
+
+
+def _back_path(request):
+    """GET か POST の back を読み、BACK_LABELS の画面のアドレス（/map/room/4/ など）なら返す。それ以外は None。
+
+    ほかのサイトのアドレス（https://… や //…）や、知らない画面のアドレスを入れられても使わない
+    （「戻る」を押したら別のサイトに飛ばされる、ということを防ぐ）。
+    """
+    value = request.POST.get("back") or request.GET.get("back")
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return None
+    if not url_has_allowed_host_and_scheme(value, allowed_hosts={request.get_host()}):
+        return None
+    path = urlsplit(value).path  # ?focus= などのクエリは使わない
+    try:
+        match = resolve(path)
+    except Resolver404:
+        return None
+    return path if match.url_name in BACK_LABELS else None
+
+
+def _back_query(request):
+    """リンクの後ろに付ける「?back=…」（back がなければ空の文字）。"""
+    path = _back_path(request)
+    return "?" + urlencode({"back": path}) if path else ""
+
+
+def _with_back(request, url):
+    """url に、今の back を付けて返す。戻ったあとの画面でも、同じ戻り先を覚えておくため。"""
+    return url + _back_query(request)
+
+
+def _back_context(request, focus=None):
+    """テンプレートに渡す戻り先。back：「←」のリンク {url, label}（なければ None）。
+
+    マップに戻るときは ?focus=番号 を付けて、そのタスクの点を光らせる（task_map.js が読む）。
+    """
+    path = _back_path(request)
+    back = None
+    if path:
+        name = resolve(path).url_name
+        url = path
+        if name == "task_map_room" and focus is not None:
+            url += "?" + urlencode({"focus": focus})
+        back = {"url": url, "label": BACK_LABELS[name]}
+    return {"back": back, "back_path": path or "", "back_query": _back_query(request)}
 
 
 @login_required  # ログインしていない人はログイン画面に送られる
@@ -93,6 +153,8 @@ class TaskDetailView(OwnTaskMixin, DetailView):
         context["child_level"] = depth + 1
         # 資料を足すフォーム（空の状態）
         context["source_form"] = SourceForm()
+        # 戻り先（マップ・進み具合から来たときは、「←」をそこにする）
+        context.update(_back_context(self.request, focus=self.object.pk))
         return context
 
 
@@ -140,7 +202,10 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         context = super().get_context_data(**kwargs)
         context["page_title"] = "サブタスクの追加" if self.parent else "タスクの登録"
         context["submit_label"] = "追加する" if self.parent else "登録する"
-        context["cancel_url"] = reverse("task_detail", args=[self.parent.pk]) if self.parent else reverse("home")
+        context["cancel_url"] = (
+            _with_back(self.request, reverse("task_detail", args=[self.parent.pk])) if self.parent else reverse("home")
+        )
+        context.update(_back_context(self.request))
         return context
 
     def form_valid(self, form):
@@ -150,9 +215,9 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         return response
 
     def get_success_url(self):
-        # サブタスクなら親の詳細画面へ、そうでなければホームへ戻る
+        # サブタスクなら親の詳細画面へ（戻り先を付けたまま）、そうでなければホームへ戻る
         if self.parent:
-            return reverse("task_detail", args=[self.parent.pk])
+            return _with_back(self.request, reverse("task_detail", args=[self.parent.pk]))
         return reverse("home")
 
 
@@ -171,7 +236,8 @@ class TaskUpdateView(OwnTaskMixin, UpdateView):
         context = super().get_context_data(**kwargs)
         context["page_title"] = "タスクの編集"
         context["submit_label"] = "保存する"
-        context["cancel_url"] = reverse("task_detail", args=[self.object.pk])
+        context["cancel_url"] = _with_back(self.request, reverse("task_detail", args=[self.object.pk]))
+        context.update(_back_context(self.request))
         return context
 
     def form_valid(self, form):
@@ -180,7 +246,8 @@ class TaskUpdateView(OwnTaskMixin, UpdateView):
         return response
 
     def get_success_url(self):
-        return reverse("task_detail", args=[self.object.pk])
+        # 詳細画面に戻る。戻り先（マップなど）を付けたままにして、そこから ← で戻れるようにする
+        return _with_back(self.request, reverse("task_detail", args=[self.object.pk]))
 
 
 @login_required
@@ -226,7 +293,8 @@ def category_list(request):
     """分類の一覧。名前の変更・追加・削除をこの画面で行う。"""
     # annotate(task_count=Count("tasks"))：分類ごとのタスクの数を、一緒に数えて持ってくる
     categories = request.user.categories.annotate(task_count=Count("tasks"))
-    return render(request, "tasks/category_list.html", {"categories": categories})
+    # マップの ⚙️ から来たときは、「←」をマップにする
+    return render(request, "tasks/category_list.html", {"categories": categories, **_back_context(request)})
 
 
 @login_required
@@ -239,7 +307,7 @@ def category_create(request):
             messages.success(request, f"分類「{name}」を作りました．")
         else:
             messages.info(request, f"分類「{name}」はもうあります．")
-    return redirect("category_list")
+    return redirect(_with_back(request, reverse("category_list")))  # 戻り先（マップなど）を付けたまま
 
 
 @login_required
@@ -259,7 +327,7 @@ def category_update(request, pk):
             messages.error(request, f"分類「{name}」はもうあります．")
         else:
             messages.success(request, f"「{old}」を「{name}」に変えました．")
-    return redirect("category_list")
+    return redirect(_with_back(request, reverse("category_list")))  # 戻り先（マップなど）を付けたまま
 
 
 @login_required
@@ -273,7 +341,7 @@ def category_delete(request, pk):
         messages.success(request, f"分類「{name}」を消しました．この分類だった{count}件のタスクは「分類なし」になりました．")
     else:
         messages.success(request, f"分類「{name}」を消しました．")
-    return redirect("category_list")
+    return redirect(_with_back(request, reverse("category_list")))  # 戻り先（マップなど）を付けたまま
 
 
 # ---- 資料（F-04。最初は「出どころ」という名前だった）----
@@ -294,7 +362,7 @@ def source_create(request, pk):
         for errors in form.errors.values():
             for error in errors:
                 messages.error(request, error)
-    return redirect("task_detail", pk=task.pk)
+    return redirect(_with_back(request, reverse("task_detail", args=[task.pk])))
 
 
 @login_required
@@ -306,7 +374,7 @@ def source_delete(request, pk):
     task_pk = source.task_id
     source.delete()
     messages.success(request, "資料を消しました．")
-    return redirect("task_detail", pk=task_pk)
+    return redirect(_with_back(request, reverse("task_detail", args=[task_pk])))
 
 
 @login_required
@@ -686,7 +754,8 @@ def task_map_room(request, key):
             "locked": t.is_locked and not t.is_done,
             "done": t.is_done,
             "top": t.parent_id is None,  # いちばん上のタスク（少し目立たせる）
-            "url": reverse("task_detail", args=[t.pk]),
+            # 詳細画面の「←」でこの部屋に戻れるように、戻り先（back）を付けておく
+            "url": reverse("task_detail", args=[t.pk]) + "?" + urlencode({"back": request.path}),
             # 線を引くのは、相手もこの部屋に出ているときだけ
             "parent": t.parent_id if t.parent_id in shown_ids else None,
             "prerequisite": t.prerequisite_id if t.prerequisite_id in shown_ids else None,

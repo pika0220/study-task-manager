@@ -341,7 +341,11 @@
     action = null;
     if (!done) return;
     if (done.type === "press") {
-      if (!cancelled) window.location.href = done.node.url; // 押しただけ：詳細画面へ
+      if (!cancelled) {
+        // 押しただけ：詳細画面へ。詳細の「← 🗺️ マップ」で戻ったときに同じ場所を見せるため、今の場所を覚えておく
+        rememberView();
+        window.location.href = done.node.url;
+      }
       return;
     }
     suppressClick = true;
@@ -401,18 +405,22 @@
   };
 
   // ---- 画面を読みこみ直しても、見ていた場所と大きさに戻す ----
-  // つないだ・外した・足したあとは画面が読みこみ直されるので、その前に覚えておく（マップごとに別々）
+  // つないだ・外した・足したあと（画面が読みこみ直される）と、点を押して詳細画面へ行くときに覚えておく（マップごとに別々）
   const VIEW_KEY = `task-map-view-${roomKey}`;
+  function rememberView() {
+    // function で書くと、この行より上（点を押したとき）からも呼べる
+    try {
+      const [x, y] = viewCenter();
+      sessionStorage.setItem(VIEW_KEY, JSON.stringify({ x, y, scale }));
+    } catch (error) {
+      // 保存できない設定のブラウザでは、覚えないだけ
+    }
+  }
   document.addEventListener(
     "submit",
     (event) => {
       if (event.target.dataset.noKeep !== undefined) return; // 並べ直すときは覚えない（全体が見える大きさで開く）
-      try {
-        const [x, y] = viewCenter();
-        sessionStorage.setItem(VIEW_KEY, JSON.stringify({ x, y, scale }));
-      } catch (error) {
-        // 保存できない設定のブラウザでは、覚えないだけ
-      }
+      rememberView();
     },
     true,
   );

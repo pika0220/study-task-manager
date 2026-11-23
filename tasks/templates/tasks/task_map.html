@@ -21,7 +21,7 @@
       {% endfor %}
     </select>
     <!-- 部屋＝分類。部屋を足す・名前を変えるのは、分類の管理の画面で -->
-    <a href="{% url 'category_list' %}" class="btn btn-outline btn-square min-h-11 min-w-11 shrink-0" aria-label="分類（部屋）の管理">⚙️</a>
+    <a href="{% url 'category_list' %}?back={{ request.path|urlencode:'' }}" class="btn btn-outline btn-square min-h-11 min-w-11 shrink-0" aria-label="分類（部屋）の管理">⚙️</a>
   </div>
 
   <!-- 使い方は、ふだんは1行だけ見せて、押すと全部開く（マップを広く使うため）。説明は記号を中心に短く -->

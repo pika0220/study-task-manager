@@ -20,7 +20,7 @@
         {% endfor %}
         {% if level < 3 %}
           <li>
-            <a href="{% url 'task_create_child' parent.pk %}" class="btn btn-ghost btn-sm min-h-11 px-1 text-primary">＋ サブタスク</a>
+            <a href="{% url 'task_create_child' parent.pk %}{{ back_query }}" class="btn btn-ghost btn-sm min-h-11 px-1 text-primary">＋ サブタスク</a>
           </li>
         {% endif %}
       </ul>

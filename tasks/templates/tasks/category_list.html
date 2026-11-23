@@ -4,7 +4,11 @@
 
 {% block content %}
   <div class="mb-3 text-sm">
-    <a href="{% url 'home' %}" class="link">← ホーム</a>
+    {% if back %}
+      <a href="{{ back.url }}" class="link">← {{ back.label }}</a>
+    {% else %}
+      <a href="{% url 'home' %}" class="link">← ホーム</a>
+    {% endif %}
   </div>
 
   <h1 class="mb-1 text-xl font-bold">分類の管理</h1>
@@ -17,6 +21,7 @@
           <!-- 名前の変更 -->
           <form method="post" action="{% url 'category_update' category.pk %}" class="flex gap-2">
             {% csrf_token %}
+            {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
             <input type="text" name="name" value="{{ category.name }}" maxlength="50" required
                    class="input min-w-0 flex-1" aria-label="分類「{{ category.name }}」の名前">
             <button type="submit" class="btn">保存</button>
@@ -27,6 +32,7 @@
             <form method="post" action="{% url 'category_delete' category.pk %}"
                   onsubmit="return confirm('分類「{{ category.name|escapejs }}」を消しますか？{% if category.task_count %}\nこの分類のタスク{{ category.task_count }}件は「分類なし」になります．{% endif %}')">
               {% csrf_token %}
+              {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
               <button type="submit" class="btn btn-ghost btn-sm text-error">消す</button>
             </form>
           </div>
@@ -40,6 +46,7 @@
   <!-- 新しい分類を足す -->
   <form method="post" action="{% url 'category_create' %}" class="card mt-6 bg-base-100 shadow-sm">
     {% csrf_token %}
+    {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
     <div class="card-body gap-2 p-4">
       <h2 class="font-bold">分類を足す</h2>
       <div class="flex gap-2">
