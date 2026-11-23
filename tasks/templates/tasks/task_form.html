@@ -17,6 +17,7 @@
 
       <form method="post" class="flex flex-col gap-1">
         {% csrf_token %}
+        {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
         {% for error in form.non_field_errors %}
           <div role="alert" class="alert alert-error mb-2 text-sm">{{ error }}</div>
         {% endfor %}
