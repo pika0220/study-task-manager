@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% comment %}
+  ページが見つからないときの画面（Issue #45）。本番（DEBUG=False）のときに Django が使う。
+  開発（DEBUG=True）では、調べるための黄色い画面のまま。
+  中身（どのアドレスを探したか・URLの一覧など）は見せない。
+{% endcomment %}
+
+{% block title %}見つかりません{% endblock %}
+
+{% block content %}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body items-center text-center">
+      <p class="text-4xl" aria-hidden="true">🔍</p>
+      <h1 class="card-title">ページが見つかりません</h1>
+      <p class="text-sm text-base-content/60">消したタスク・まちがったアドレス など</p>
+      <a href="{% url 'home' %}" class="btn btn-primary mt-2">🏠 ホームへ</a>
+    </div>
+  </div>
+{% endblock %}

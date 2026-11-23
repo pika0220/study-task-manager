@@ -7,11 +7,16 @@
     <div class="card-body">
       <h1 class="card-title text-2xl">ユーザー登録</h1>
 
-      <form method="post" class="flex flex-col gap-2">
-        {% csrf_token %}
-        {% include "partials/form_fields.html" %}
-        <button type="submit" class="btn btn-primary btn-block mt-4">登録する</button>
-      </form>
+      {% if closed %}
+        <!-- 本番で招待コードが決まっていないとき（Issue #45） -->
+        <p class="mt-2">🔒 今は新しく登録できません（招待された人だけ）</p>
+      {% else %}
+        <form method="post" class="flex flex-col gap-2">
+          {% csrf_token %}
+          {% include "partials/form_fields.html" %}
+          <button type="submit" class="btn btn-primary btn-block mt-4">登録する</button>
+        </form>
+      {% endif %}
 
       <p class="mt-2 text-center text-sm">
         登録済みの方は <a href="{% url 'login' %}" class="link link-primary">ログイン</a>

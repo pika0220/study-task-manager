@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -23,12 +25,61 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 # 公開するリポジトリに本物の鍵を書かないよう、環境変数から読む。
 # 環境変数がないとき（自分のパソコンでの開発）は開発用の値を使う。
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only-change-me")
+DEV_SECRET_KEY = "django-insecure-dev-only-change-me"
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", DEV_SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
+# DJANGO_DEBUG=0 のときが本番。何も入れないとき（自分のパソコン）は開発
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 
-ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if h]
+
+def env_list(name):
+    """環境変数の「a,b,c」を ["a", "b", "c"] にする。空なら []。"""
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+
+# ---- 本番だけの安全の設定（Issue #45）----
+# 開発（http://127.0.0.1）では https が使えないので、本番（DEBUG=False）のときだけ有効にする。
+# 確かめ方：本番と同じ環境変数で `python manage.py check --deploy`（CI でも毎回確かめる）
+if not DEBUG:
+    # 開発用の鍵のままや、短い鍵では公開しない。鍵を知られると、ログインの印（Cookie）を偽造できてしまう
+    if SECRET_KEY == DEV_SECRET_KEY or len(SECRET_KEY) < 50:
+        raise ImproperlyConfigured("本番では DJANGO_SECRET_KEY に、50文字以上のランダムな文字列を入れてください。")
+    # どのアドレスで開くかが決まっていないと、全部の画面が「400 Bad Request」になる
+    if not ALLOWED_HOSTS:
+        raise ImproperlyConfigured("本番では DJANGO_ALLOWED_HOSTS に、公開するアドレス（例：example.com）を入れてください。")
+    SECURE_SSL_REDIRECT = True  # http:// で来たら https:// に移す
+    SESSION_COOKIE_SECURE = True  # ログインの印（Cookie）を https のときだけ送る
+    CSRF_COOKIE_SECURE = True  # フォームの合言葉の Cookie も https のときだけ
+    # HSTS：「このサイトは、これから◯秒は https だけで開いて」とブラウザに覚えさせる。
+    # 一度覚えさせると取り消せないので、最初は1時間（3600秒）。問題がなければ、環境変数で長くする
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    # 「preload」（ブラウザに最初から https 専用として登録してもらう）はしない。
+    # 1年以上の HSTS が必要で、取り消しがほぼできず、無料サーバーのアドレス（○○.example-host.com）では申しこめないため。
+    # check --deploy の「preload していない」という警告（W021）だけ、分かったうえで出さないようにする
+    SILENCED_SYSTEM_CHECKS = ["security.W021"]
+    # 無料のサーバーの多くは、前に「プロキシ」がいて https を受け、アプリには http で渡す。
+    # そのときは DJANGO_BEHIND_PROXY=1 にして、プロキシが付ける印（X-Forwarded-Proto）で https かどうかを見る。
+    # プロキシがないのに 1 にすると、だれでも印を偽造できるので、サーバーに合わせて決める
+    if os.environ.get("DJANGO_BEHIND_PROXY") == "1":
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# フォームを送ってよい、ほかのアドレス（例：https://example.com）。プロキシの設定によっては必要になる
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+
+# 新規登録の招待コード（Issue #45）。コードは GitHub に書かず、サーバーの環境変数にだけ置いて、友達に教える。
+#   - コードがある → コードが合う人だけ登録できる
+#   - コードがない → 開発では誰でも登録できる／本番では新規登録を止める
+INVITE_CODE = os.environ.get("DJANGO_INVITE_CODE", "")
+SIGNUP_WITHOUT_INVITE = DEBUG
+
+# 管理画面のアドレス。/admin/ のままだと、パスワードを当てようとする機械に見つかりやすいので変えられるようにする
+ADMIN_URL = os.environ.get("DJANGO_ADMIN_URL", "admin/")
+if not ADMIN_URL.endswith("/") or ADMIN_URL.startswith("/"):
+    raise ImproperlyConfigured("DJANGO_ADMIN_URL は「kanri-xxxx/」のように、/ で始めず / で終わる形にしてください。")
 
 
 # Application definition
