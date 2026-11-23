@@ -29,13 +29,13 @@
     <summary class="cursor-pointer py-1">📦 棚から置く ・ ● から線を引く（使い方）</summary>
     <ul class="mt-1 list-disc space-y-1 pl-5">
       <li>🗺️ 部屋 ＝ 分類．📦 棚 ＝ まだ置いていないタスク</li>
-      <li>📦 → 置く：中の作業も一緒に出る ／ しまう：📦 へ戻す（タスクは消えない）</li>
+      <li>📦 → 置く：サブタスクも一緒に出る ／ しまう：📦 へ戻す（タスクは消えない）</li>
       <li>点をなぞる → 動かす</li>
-      <li>● → 別の点：📁 中に入れる ・ 🔒 終わってからやる</li>
+      <li>● → 別の点：📁 サブタスクにする ・ 🔒 終わってからやる</li>
       <li>線を押す → 📁 ⇔ 🔒 の切り替え ・ 外す</li>
       <li>＋ タスク → 名前・どのタスクに・つなぎ方</li>
       <li>点を押す → 詳細</li>
-      <li>━ 📁 中の作業 ／ ┅▶ 🔒 先にやること → あと</li>
+      <li>━ 📁 サブタスク ／ ┅▶ 🔒 先にやること → あと</li>
     </ul>
     <!-- 点の場所を消して、自動で並べ直す。見ていた場所は覚えず、全体が見える大きさで開き直す（data-no-keep） -->
     <form method="post" action="{% url 'task_map_arrange' room_key %}" class="mt-2" data-no-keep
@@ -161,7 +161,7 @@
           <legend class="text-sm font-bold">つなぎ方</legend>
           <label class="mt-1 flex min-h-11 cursor-pointer items-center gap-2">
             <input type="radio" name="relation" value="child" class="radio radio-primary" checked>
-            <span>📁 その中に入れる（中の作業）</span>
+            <span>📁 そのサブタスクにする</span>
           </label>
           <label class="flex min-h-11 cursor-pointer items-center gap-2">
             <input type="radio" name="relation" value="after" class="radio radio-primary">

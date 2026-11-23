@@ -5,8 +5,8 @@
 {% block content %}
   <div class="mb-4 flex items-end justify-between gap-2">
     <h1 class="text-xl font-bold">進み具合</h1>
-    <!-- 何を数えているかを、記号で短く示す（📁 の中の作業がないタスクを1件と数える） -->
-    <span class="text-xs text-base-content/60">1件＝中の作業がないタスク</span>
+    <!-- 何を数えているかを、記号で短く示す（サブタスクのないタスクを1件と数える） -->
+    <span class="text-xs text-base-content/60">1件 ＝ サブタスクのないタスク</span>
   </div>
 
   {% if overall.total %}
@@ -73,9 +73,9 @@
       {% endfor %}
     </div>
 
-    <!-- 中の作業があるタスクごと（いちばん上のタスク）。🗺 でそのタスクがいる部屋へ -->
+    <!-- サブタスクがあるタスクごと（いちばん上のタスク）。🗺 でそのタスクがいる部屋へ -->
     {% if main_tasks %}
-      <h2 class="mb-2 font-bold">📁 中の作業があるタスク</h2>
+      <h2 class="mb-2 font-bold">📁 サブタスクのあるタスク</h2>
       <div class="flex flex-col gap-2">
         {% for item in main_tasks %}
           <div class="card bg-base-100 shadow-sm">

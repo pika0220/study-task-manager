@@ -75,7 +75,7 @@ class Task(models.Model):
         verbose_name="親タスク",
     )
     # 前後のつながり（F-08）：このタスクの前に終わらせておくタスク。1つだけ選べる。
-    # 親子（中の作業）とは別のつながり。先にやるタスクを消したら、つながりだけ外れる（SET_NULL）
+    # 親子（サブタスク）とは別のつながり。先にやるタスクを消したら、つながりだけ外れる（SET_NULL）
     prerequisite = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -89,7 +89,7 @@ class Task(models.Model):
     map_x = models.FloatField("マップの横の位置", null=True, blank=True)
     map_y = models.FloatField("マップの縦の位置", null=True, blank=True)
     # 分類ごとの部屋（マップ）に置いてあるか（Issue #36）。いちばん上のタスクにだけ使う。
-    # 置いていないタスクは「棚」に並び、置くと中の作業も一緒にマップに出る
+    # 置いていないタスクは「棚」に並び、置くとサブタスクも一緒にマップに出る
     on_map = models.BooleanField("マップに置いてある", default=False)
     is_done = models.BooleanField("完了", default=False)
     done_at = models.DateTimeField("完了した日時", null=True, blank=True)
@@ -140,18 +140,18 @@ class Task(models.Model):
             return
 
         if self.owner_id and self.parent.owner_id != self.owner_id:
-            raise ValidationError({"parent": "他の人のタスクを親にはできません。"})
+            raise ValidationError({"parent": "他の人のタスクのサブタスクにはできません．"})
 
         # 自分自身や自分の子孫を親にすると、親子が輪になってしまう
         node = self.parent
         while node is not None:
             if self.pk is not None and node.pk == self.pk:
-                raise ValidationError({"parent": "自分自身や自分の子タスクを親にはできません。"})
+                raise ValidationError({"parent": "自分自身や自分のサブタスクの下には入れられません．"})
             node = node.parent
 
         if self.parent.depth() + self.height() > self.MAX_DEPTH:
             raise ValidationError(
-                {"parent": f"タスクの入れ子は{self.MAX_DEPTH}段までです。"}
+                {"parent": f"📁 サブタスクは{self.MAX_DEPTH}段までです．"}
             )
 
     def _clean_prerequisite(self):
@@ -160,21 +160,21 @@ class Task(models.Model):
             return
 
         if self.owner_id and prereq.owner_id != self.owner_id:
-            raise ValidationError({"prerequisite": "他の人のタスクは選べません。"})
+            raise ValidationError({"prerequisite": "他の人のタスクは選べません．"})
         if self.pk is not None and prereq.pk == self.pk:
-            raise ValidationError({"prerequisite": "自分自身は選べません。"})
+            raise ValidationError({"prerequisite": "自分自身は選べません．"})
 
         # 親子とは別のつながりなので、自分の親や子孫は選べない
         if prereq.pk in {a.pk for a in self.ancestors()}:
-            raise ValidationError({"prerequisite": "自分の親タスクは選べません。"})
+            raise ValidationError({"prerequisite": "自分が入っている上のタスクは選べません．"})
         if self.pk is not None and self.pk in {a.pk for a in prereq.ancestors()}:
-            raise ValidationError({"prerequisite": "自分の子タスクは選べません。"})
+            raise ValidationError({"prerequisite": "自分のサブタスクは選べません．"})
 
         # 先にやることを順にたどって自分に戻ってきたら、前後が輪になっている
         node, seen = prereq, set()
         while node is not None and node.pk not in seen:
             if self.pk is not None and node.pk == self.pk:
-                raise ValidationError({"prerequisite": "前後のつながりが輪になってしまいます。"})
+                raise ValidationError({"prerequisite": "前後のつながりが輪になってしまいます．"})
             seen.add(node.pk)
             node = node.prerequisite
 
@@ -204,7 +204,7 @@ class Task(models.Model):
             if update_fields is not None and "category" not in update_fields:
                 kwargs["update_fields"] = [*update_fields, "category"]
         super().save(*args, **kwargs)
-        # 自分の中の作業（子・孫）の分類も、自分にそろえる。入れ子は3段までなので、子と孫で全部
+        # 自分のサブタスク（子・孫）の分類も、自分にそろえる。入れ子は3段までなので、子と孫で全部
         (
             Task.objects.filter(Q(parent=self) | Q(parent__parent=self))
             .exclude(category_id=self.category_id)
@@ -231,7 +231,7 @@ class Task(models.Model):
         return "later"
 
     def progress(self):
-        """子タスクのうち完了したものの割合（0～100）。子がなければ None。"""
+        """サブタスクのうち完了したものの割合（0～100）。子がなければ None。"""
         children = list(self.children.all())
         if not children:
             return None

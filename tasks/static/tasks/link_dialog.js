@@ -1,7 +1,7 @@
 // 「つなぎ方」を選ぶ画面（_link_dialog.html）を開く部品。
 // ホームのドラッグ（drag_link.js）と、マインドマップ（task_map.js）の両方から
 //   window.TaskLink.open({ id, title }, { id, title })
-// のように使う。1つ目のタスクを、2つ目のタスクに「中に入れる」か「終わってからやる」かを選ぶ。
+// のように使う。1つ目のタスクを、2つ目のタスクに「サブタスクにする」か「終わってからやる」かを選ぶ。
 window.TaskLink = (() => {
   const dialog = document.getElementById("link-dialog");
   if (!dialog) return null;

@@ -188,7 +188,7 @@
   );
 
   // ---- 線を描く ----
-  // relation："child"（from は to の中の作業）／"after"（from は to が終わってから）
+  // relation："child"（from は to のサブタスク）／"after"（from は to が終わってから）
   const edges = [];
   nodes.forEach((node) => {
     // 先にやること（同じ親の中のタスク）の先に描くタスクは、親との線を引かない（🔒 の線だけでつながって見える）
@@ -362,7 +362,7 @@
       const target = over;
       setOver(null);
       if (!cancelled && target && window.TaskLink) {
-        // 「done.node を target の中に入れる／target が終わってからやる」を選ぶ画面
+        // 「done.node を target のサブタスクにする／target が終わってからやる」を選ぶ画面
         window.TaskLink.open(done.node, target);
       }
     }
@@ -378,25 +378,25 @@
     const isChild = edge.relation === "child";
     const { from, to } = edge;
     unlinkDialog.querySelector("[data-unlink-text]").textContent = isChild
-      ? `📁 「${from.title}」は「${to.title}」の中の作業です．`
-      : `🔒 「${from.title}」は「${to.title}」が終わってからです．`;
+      ? `📁 「${from.title}」は「${to.title}」のサブタスク`
+      : `🔒 「${from.title}」は「${to.title}」が終わってから`;
 
     // 切り替えるボタン：📁 なら 🔒 に、🔒 なら 📁 に
     const relinkButton = unlinkDialog.querySelector("[data-relink-button]");
     relinkButton.formAction = urlFor(relinkUrlTemplate, from.id);
     unlinkDialog.querySelector("[data-relink-label]").textContent = isChild
       ? `🔒 「${to.title}」が終わってからやる，に切り替える`
-      : `📁 「${to.title}」の中に入れる，に切り替える`;
+      : `📁 「${to.title}」のサブタスクにする，に切り替える`;
     relinkButton.disabled = false;
     unlinkDialog.querySelector("[data-relink-reason]").textContent = "";
 
     unlinkDialog.querySelector("[data-unlink-button]").formAction = urlFor(unlinkUrlTemplate, from.id);
     const parent = byId.get(from.parent);
     unlinkDialog.querySelector("[data-unlink-note]").textContent = isChild
-      ? `どちらを選んでもタスクは消えません．外すと，「${from.title}」はこの部屋のいちばん上のタスクになります．`
+      ? `外す → 「${from.title}」はこの部屋のいちばん上のタスクに（どちらもタスクは消えない）`
       : from.chained && parent
-        ? `どちらを選んでもタスクは消えません．外すと，「${from.title}」は「${parent.title}」の中の作業として線でつながります．`
-        : "どちらを選んでもタスクは消えません．";
+        ? `外す → 「${from.title}」は「${parent.title}」のサブタスクとして線でつながる（どちらもタスクは消えない）`
+        : "どちらもタスクは消えない";
     unlinkDialog.showModal();
   };
 
@@ -468,7 +468,7 @@
 
   // ---- 置いた・足したタスクを見せる（?focus=番号）----
   // 棚から置いた木や、新しく足したタスクは、今見ている場所の外（下など）にあることがある。
-  // その木（そのタスクと中の作業）が窓に入るまでスクロールし、少しの間ふちを光らせる
+  // その木（そのタスクとサブタスク）が窓に入るまでスクロールし、少しの間ふちを光らせる
   const params = new URLSearchParams(window.location.search);
   const focused = byId.get(Number(params.get("focus")));
   if (params.has("focus")) {
