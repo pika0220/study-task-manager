@@ -88,6 +88,9 @@ class Task(models.Model):
     # まだマップで動かしていないタスクは空（None）のままで、マップの画面が自動で並べる
     map_x = models.FloatField("マップの横の位置", null=True, blank=True)
     map_y = models.FloatField("マップの縦の位置", null=True, blank=True)
+    # 分類ごとの部屋（マップ）に置いてあるか（Issue #36）。いちばん上のタスクにだけ使う。
+    # 置いていないタスクは「棚」に並び、置くと中の作業も一緒にマップに出る
+    on_map = models.BooleanField("マップに置いてある", default=False)
     is_done = models.BooleanField("完了", default=False)
     done_at = models.DateTimeField("完了した日時", null=True, blank=True)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)

@@ -896,223 +896,208 @@ class DragLinkTests(TestCase):
 
 
 class MindMapTests(TestCase):
-    """マインドマップ（Issue #30）。メインタスクごとのマップ・並べ方・置き場所の保存・名前だけで追加・つながりの切り替えと外す。"""
+    """マインドマップ（Issue #30・#36）。分類ごとの部屋・棚・並べ方・置き場所の保存・名前だけで追加・つながりの切り替えと外す。"""
 
     def setUp(self):
         User = get_user_model()
         self.me = User.objects.create_user("student", password="test-pass-123")
         self.other = User.objects.create_user("other", password="test-pass-123")
-        self.study = Task.objects.create(owner=self.me, title="卒業研究", importance=Task.Importance.HIGH)
+        cats = {c.name: c for c in self.me.categories.all()}
+        self.research, self.lesson = cats["研究"], cats["授業"]
+        self.study = Task.objects.create(
+            owner=self.me, title="卒業研究", importance=Task.Importance.HIGH, category=self.research, on_map=True
+        )
         self.reading = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
         self.slides = Task.objects.create(
             owner=self.me, title="発表スライド", parent=self.study, prerequisite=self.reading
         )
-        self.done_child = Task.objects.create(owner=self.me, title="済んだ枝", parent=self.study, is_done=True)
-        self.report = Task.objects.create(owner=self.me, title="実習レポート")
+        self.done_child = Task.objects.create(owner=self.me, title="済んだタスク", parent=self.study, is_done=True)
+        self.paper = Task.objects.create(owner=self.me, title="論文を読む", category=self.research)  # 棚にある
+        self.report = Task.objects.create(owner=self.me, title="実習レポート", category=self.lesson, on_map=True)
         self.others_task = Task.objects.create(owner=self.other, title="他の人のタスク")
         self.client.force_login(self.me)
 
-    def map_url(self, root=None):
-        return reverse("task_map_root", args=[(root or self.study).pk])
+    def room_url(self, category=None):
+        key = str((category or self.research).pk) if category is not False else "none"
+        return reverse("task_map_room", args=[key])
 
-    def nodes(self, root=None):
-        response = self.client.get(self.map_url(root))
-        return {node["title"]: node for node in response.context["nodes"]}
+    def get_room(self, category=None):
+        return self.client.get(self.room_url(category))
+
+    def nodes(self, category=None):
+        return {node["title"]: node for node in self.get_room(category).context["nodes"]}
 
     def center(self, node):
         return (node["x"] + 65, node["y"] + 22)  # 点の大きさ 130×44 の真ん中
 
-    # ---- 画面・切り替え ----
+    # ---- 部屋・切り替え ----
     def test_anonymous_user_is_sent_to_login(self):
         self.client.logout()
-        response = self.client.get(reverse("task_map"))
-        self.assertRedirects(response, reverse("login") + "?next=/map/")
+        self.assertRedirects(self.client.get(reverse("task_map")), reverse("login") + "?next=/map/")
 
-    def test_map_top_opens_the_first_main_task_with_branches(self):
+    def test_map_top_opens_a_room_with_placed_tasks(self):
         response = self.client.get(reverse("task_map"))
-        self.assertRedirects(response, self.map_url())
+        self.assertRedirects(response, self.room_url())  # 置いてあるタスクのある部屋（いちばん上の順で最初）
 
-    def test_map_top_without_tasks_shows_how_to_start(self):
-        self.me.tasks.all().delete()
-        response = self.client.get(reverse("task_map"))
-        self.assertContains(response, "まだマップがありません")
-
-    def test_map_shows_only_this_main_task_and_its_open_branches(self):
+    def test_room_shows_only_placed_tasks_and_their_open_work(self):
         nodes = self.nodes()
-        # 完了した枝・ほかのメインタスク・他の人のタスクは出ない
+        # 棚のタスク・終わったタスク・別の分類・他の人のタスクは出ない
         self.assertEqual(set(nodes), {"卒業研究", "文献調査", "発表スライド"})
-        self.assertTrue(nodes["卒業研究"]["root"])
-        self.assertFalse(nodes["文献調査"]["root"])
+        self.assertTrue(nodes["卒業研究"]["top"])
+        self.assertFalse(nodes["文献調査"]["top"])
         self.assertEqual(nodes["文献調査"]["parent"], self.study.pk)
         self.assertEqual(nodes["発表スライド"]["prerequisite"], self.reading.pk)
         self.assertTrue(nodes["発表スライド"]["locked"])
         self.assertEqual(nodes["卒業研究"]["url"], reverse("task_detail", args=[self.study.pk]))
 
-    def test_menu_lists_my_open_main_tasks_with_branch_count(self):
-        response = self.client.get(self.map_url())
-        menu = response.context["menu"]
-        self.assertEqual([item["title"] for item in menu], ["卒業研究", "実習レポート"])  # 枝のあるものが先
-        self.assertEqual(menu[0]["count"], 2)  # 完了した枝は数えない
-        self.assertContains(response, self.map_url(self.report))
+    def test_room_menu_lists_categories_with_counts(self):
+        response = self.get_room()
+        rooms = {r["name"]: r["count"] for r in response.context["rooms"]}
+        self.assertEqual(rooms["研究"], 2)  # 卒業研究（置いてある）＋論文を読む（棚）
+        self.assertEqual(rooms["授業"], 1)
+        self.assertNotIn("分類なし", rooms)  # 分類なしのタスクがないときは出さない
+        self.assertContains(response, self.room_url(self.lesson))
 
-    def test_child_task_url_moves_to_its_main_task_map(self):
-        chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
-        response = self.client.get(self.map_url(chapter))
-        self.assertRedirects(response, self.map_url())
+    def test_no_category_room(self):
+        Task.objects.create(owner=self.me, title="分類なしのメモ", on_map=True)
+        self.assertEqual(set(self.nodes(False)), {"分類なしのメモ"})
 
-    def test_cannot_open_others_map(self):
-        self.assertEqual(self.client.get(self.map_url(self.others_task)).status_code, 404)
+    def test_cannot_open_others_room(self):
+        other_category = self.other.categories.first()
+        self.assertEqual(self.client.get(self.room_url(other_category)).status_code, 404)
+        self.assertEqual(self.client.get(reverse("task_map_room", args=["abc"])).status_code, 404)
 
-    def test_links_to_tasks_outside_the_map_are_not_drawn(self):
-        # 先にやることが別のマップにあるときは、線を引く相手がいないので None にする
-        self.reading.prerequisite = self.report
+    def test_task_url_moves_to_its_room(self):
+        response = self.client.get(reverse("task_map_root", args=[self.reading.pk]))
+        self.assertRedirects(response, self.room_url())
+        self.assertEqual(self.client.get(reverse("task_map_root", args=[self.others_task.pk])).status_code, 404)
+
+    def test_links_to_tasks_outside_the_room_are_not_drawn(self):
+        self.reading.prerequisite = self.report  # 別の部屋のタスク
         self.reading.save()
         self.assertIsNone(self.nodes()["文献調査"]["prerequisite"])
 
+    # ---- 棚 ----
+    def test_shelf_lists_unplaced_top_tasks(self):
+        response = self.get_room()
+        self.assertEqual([t.title for t in response.context["shelf"]], ["論文を読む"])
+        self.assertEqual([t.title for t in response.context["placed"]], ["卒業研究"])
+        self.assertContains(response, reverse("task_map_place", args=[self.paper.pk]))
+
+    def test_place_puts_a_task_and_its_work_on_the_map(self):
+        child = Task.objects.create(owner=self.me, title="1章", parent=self.paper)
+        response = self.client.post(reverse("task_map_place", args=[self.paper.pk]), follow=True)
+        # ?focus=番号：置いた木が画面の外にならないよう、画面がそこへ動く（task_map.js）
+        self.assertRedirects(response, self.room_url() + f"?focus={self.paper.pk}")
+        self.assertContains(response, "「論文を読む」を置きました．")
+        nodes = self.nodes()
+        self.assertIn("論文を読む", nodes)
+        self.assertEqual(nodes["1章"]["parent"], self.paper.pk)
+        self.assertEqual(child.pk, nodes["1章"]["id"])
+
+    def test_second_placed_tree_goes_below_the_first(self):
+        # 中の作業が上と下に出る木（上に出る分も考えて、重ならない場所に置けるか）
+        Task.objects.create(owner=self.me, title="1章", parent=self.paper)
+        Task.objects.create(owner=self.me, title="2章", parent=self.paper)
+        first_tree = self.nodes()
+        self.client.post(reverse("task_map_place", args=[self.paper.pk]))
+        nodes = self.nodes()
+        # スマホの縦長の画面に合うよう、2つ目の木は1つ目の木のすべての点より下に、縦に積む（横はそろえる）
+        lowest = max(n["y"] for n in first_tree.values())
+        for title in ["論文を読む", "1章", "2章"]:
+            self.assertGreater(nodes[title]["y"], lowest + 44, title)
+        self.assertEqual(nodes["論文を読む"]["x"], nodes["卒業研究"]["x"])
+
+    def test_stow_returns_a_task_to_the_shelf(self):
+        response = self.client.post(reverse("task_map_stow", args=[self.study.pk]), follow=True)
+        self.assertContains(response, "「卒業研究」を棚にしまいました．")
+        self.assertEqual(self.nodes(), {})
+        self.assertTrue(Task.objects.filter(pk=self.reading.pk, parent=self.study).exists())  # つながりは残る
+
+    def test_place_and_stow_only_top_tasks_of_mine_by_post(self):
+        self.assertEqual(self.client.post(reverse("task_map_place", args=[self.reading.pk])).status_code, 404)
+        self.assertEqual(self.client.post(reverse("task_map_place", args=[self.others_task.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("task_map_stow", args=[self.study.pk])).status_code, 405)
+
     # ---- 並べ方 ----
-    def test_main_task_is_in_the_middle_and_branches_spread_around(self):
-        # 前後のつながりがない子タスクが2つのとき
-        self.slides.prerequisite = None
+    def test_work_spreads_around_its_top_task(self):
+        self.slides.prerequisite = None  # 前後のつながりがない子が2つ
         self.slides.save()
         nodes = self.nodes()
         cx, cy = self.center(nodes["卒業研究"])
-        # 子が2つなら、真ん中のメインタスクの上と下に、同じ距離で分かれる
         rx, ry = self.center(nodes["文献調査"])
         sx, sy = self.center(nodes["発表スライド"])
         self.assertLess(ry, cy)
         self.assertGreater(sy, cy)
         self.assertAlmostEqual(math.dist((cx, cy), (rx, ry)), math.dist((cx, cy), (sx, sy)), places=3)
 
-    def test_grandchild_is_further_out_than_its_parent(self):
-        Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
+    def test_task_after_a_sibling_is_drawn_beyond_it(self):
         nodes = self.nodes()
-        main = self.center(nodes["卒業研究"])
-        self.assertGreater(
-            math.dist(main, self.center(nodes["第1章"])), math.dist(main, self.center(nodes["文献調査"]))
+        self.assertTrue(nodes["発表スライド"]["chained"])
+        self.assertEqual(nodes["発表スライド"]["parent"], self.study.pk)  # データ（親子）は変えない
+        top, reading, slides = (self.center(nodes[t]) for t in ["卒業研究", "文献調査", "発表スライド"])
+        self.assertGreater(math.dist(top, slides), math.dist(top, reading))
+
+    def test_top_tasks_after_each_other_are_chained_too(self):
+        nxt = Task.objects.create(
+            owner=self.me, title="論文を書く", category=self.research, prerequisite=self.study, on_map=True
         )
+        nodes = self.nodes()
+        self.assertTrue(nodes["論文を書く"]["chained"])
+        self.assertEqual(nodes["論文を書く"]["prerequisite"], self.study.pk)
+        self.assertEqual(nxt.pk, nodes["論文を書く"]["id"])
+
+    def test_placed_trees_do_not_overlap(self):
+        for title in ["A", "B", "C"]:
+            top = Task.objects.create(owner=self.me, title=title, category=self.research, on_map=True)
+            for i in range(3):
+                Task.objects.create(owner=self.me, title=f"{title}{i}", parent=top)
+        boxes = [(n["x"], n["y"]) for n in self.nodes().values()]
+        for i, (x1, y1) in enumerate(boxes):
+            for x2, y2 in boxes[i + 1 :]:
+                self.assertTrue(abs(x1 - x2) >= 130 or abs(y1 - y2) >= 44, (x1, y1, x2, y2))
 
     def test_auto_positions_are_saved_so_nodes_do_not_jump(self):
         first = self.nodes()
-        self.reading.refresh_from_db()
-        self.assertEqual((self.reading.map_x, self.reading.map_y), (first["文献調査"]["x"], first["文献調査"]["y"]))
-        # タスクを足しても、前からある点は動かない
         Task.objects.create(owner=self.me, title="新しいタスク", parent=self.study)
         second = self.nodes()
         for title in ["卒業研究", "文献調査", "発表スライド"]:
             self.assertEqual((first[title]["x"], first[title]["y"]), (second[title]["x"], second[title]["y"]))
 
-    def test_new_branch_follows_a_moved_parent(self):
-        self.nodes()  # 一度開いて、場所を決めておく
-        self.reading.refresh_from_db()
-        old = (self.reading.map_x, self.reading.map_y)
-        self.client.post(reverse("task_map_position", args=[self.reading.pk]), {"x": old[0] + 500, "y": old[1]})
-        Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
-        nodes = self.nodes()
-        # 親（文献調査）を右へ動かしたあとに足した子は、親の「前の場所」より「今の場所」の近くに出る
-        chapter = (nodes["第1章"]["x"], nodes["第1章"]["y"])
-        self.assertLess(math.dist(chapter, (old[0] + 500, old[1])), math.dist(chapter, old))
-
-    def test_task_after_a_sibling_is_drawn_beyond_it(self):
-        # 発表スライドは「文献調査（同じ卒業研究の中）」が終わってから → マップでは 文献調査 の先に描く
-        nodes = self.nodes()
-        self.assertTrue(nodes["発表スライド"]["chained"])
-        self.assertFalse(nodes["文献調査"]["chained"])
-        self.assertEqual(nodes["発表スライド"]["parent"], self.study.pk)  # データ（親子）は変えない
-        main = self.center(nodes["卒業研究"])
-        reading = self.center(nodes["文献調査"])
-        slides = self.center(nodes["発表スライド"])
-        # 真ん中から見て、文献調査より遠く、文献調査のほうが近い
-        self.assertGreater(math.dist(main, slides), math.dist(main, reading))
-        self.assertLess(math.dist(reading, slides), math.dist(main, slides))
-
-    def test_task_after_a_task_in_another_group_is_not_chained(self):
-        # 先にやることが「同じ親の中」でなければ、ふつうに親から伸ばす
-        chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
-        Task.objects.create(owner=self.me, title="まとめ", parent=self.study, prerequisite=chapter)
-        self.assertFalse(self.nodes()["まとめ"]["chained"])
-
-    def test_arrange_clears_positions_of_this_map_only(self):
-        self.nodes()
-        self.report.map_x, self.report.map_y = 10, 10
-        self.report.save()
-        response = self.client.post(reverse("task_map_arrange", args=[self.study.pk]), follow=True)
-        self.assertRedirects(response, self.map_url())
-        self.assertContains(response, "点を自動で並べ直しました．")
-        self.reading.refresh_from_db()
-        self.report.refresh_from_db()
-        # このマップの点は並べ直されて（開き直したので、新しい場所が保存されて）いて、ほかのマップの点はそのまま
-        self.assertIsNotNone(self.reading.map_x)
-        self.assertEqual((self.report.map_x, self.report.map_y), (10, 10))
-
-    def test_arrange_resets_moved_nodes(self):
+    def test_arrange_resets_positions_in_the_room(self):
         self.nodes()
         self.client.post(reverse("task_map_position", args=[self.reading.pk]), {"x": "4000", "y": "4000"})
-        self.client.post(reverse("task_map_arrange", args=[self.study.pk]))
-        self.reading.refresh_from_db()
-        self.assertIsNone(self.reading.map_x)  # 開き直すまでは空。次に開くと自動で決まる
+        response = self.client.post(reverse("task_map_arrange", args=[str(self.research.pk)]), follow=True)
+        self.assertContains(response, "点を自動で並べ直しました．")
         self.assertLess(self.nodes()["文献調査"]["x"], 4000)
 
-    def test_arrange_needs_my_main_task_and_post(self):
-        url = reverse("task_map_arrange", args=[self.study.pk])
-        self.assertEqual(self.client.get(url).status_code, 405)
-        self.assertEqual(self.client.post(reverse("task_map_arrange", args=[self.reading.pk])).status_code, 404)
-        self.assertEqual(self.client.post(reverse("task_map_arrange", args=[self.others_task.pk])).status_code, 404)
-
-    def test_new_branch_does_not_overlap_other_nodes(self):
-        self.nodes()  # 一度開いて、今ある点の場所を決めておく
-        for i in range(6):
-            Task.objects.create(owner=self.me, title=f"枝{i}", parent=self.study)
-        boxes = [(n["x"], n["y"]) for n in self.nodes().values()]
-        for i, (x1, y1) in enumerate(boxes):
-            for x2, y2 in boxes[i + 1 :]:
-                # 点（130×44）どうしが重なっていない
-                self.assertTrue(abs(x1 - x2) >= 130 or abs(y1 - y2) >= 44, (x1, y1, x2, y2))
-
-    def test_anchor_choices_include_every_task_with_level(self):
-        chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)  # 3段目
-        response = self.client.get(self.map_url())
-        choices = {c["pk"]: c for c in response.context["parent_choices"]}
-        self.assertEqual(response.context["parent_choices"][0]["pk"], self.study.pk)  # 最初は真ん中
-        self.assertTrue(choices[self.study.pk]["is_root"])
-        # 3段目も出す（「中に入れる」は押せないが、「終わってからやる」には使える）
-        self.assertEqual(choices[chapter.pk]["level"], 3)
-        self.assertContains(response, "どのタスクに？")
-        self.assertContains(response, "つなぎ方")
-        self.assertContains(response, "data-add-task")
-        self.assertContains(response, "＋ タスクを足す")
-        self.assertNotContains(response, "枝")
-
     def test_map_page_has_dialogs_and_scripts(self):
-        response = self.client.get(self.map_url())
-        self.assertContains(response, 'id="map-data"')
-        self.assertContains(response, 'id="map-select"')
-        self.assertContains(response, 'data-zoom="fit"')
-        self.assertContains(response, 'id="link-dialog"')  # 線を引いたあとは #29 と同じ画面
-        self.assertContains(response, "tasks/link_dialog.js")
-        self.assertContains(response, "tasks/task_map.js")
-        self.assertNotContains(response, "tasks/drag_link.js")  # マップでは長押しのドラッグは使わない
+        response = self.get_room()
+        for text in ['id="map-data"', 'id="map-select"', 'data-zoom="fit"', 'id="map-shelf-dialog"',
+                     'id="link-dialog"', "tasks/link_dialog.js", "tasks/task_map.js", "data-add-task"]:
+            self.assertContains(response, text)
+        self.assertNotContains(response, "tasks/drag_link.js")
+        self.assertNotContains(response, "メインタスク")
 
     def test_title_is_escaped_in_map_data(self):
         Task.objects.create(owner=self.me, title="<script>alert(1)</script>", parent=self.study)
-        response = self.client.get(self.map_url())
-        self.assertNotContains(response, "<script>alert(1)</script>")
+        self.assertNotContains(self.get_room(), "<script>alert(1)</script>")
 
     def test_dock_has_map_tab(self):
-        response = self.client.get(reverse("home"))
-        self.assertContains(response, f'href="{reverse("task_map")}"')
+        self.assertContains(self.client.get(reverse("home")), f'href="{reverse("task_map")}"')
 
     def test_query_count_does_not_grow_with_tasks(self):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
 
-        self.client.get(self.map_url())  # 1回目は場所を保存するので、2回目どうしでくらべる
+        self.get_room()  # 1回目は場所を保存するので、2回目どうしでくらべる
         with CaptureQueriesContext(connection) as few:
-            self.client.get(self.map_url())
+            self.get_room()
         for i in range(5):
             Task.objects.create(owner=self.me, title=f"追加{i}", parent=self.study, prerequisite=self.reading)
-        self.client.get(self.map_url())
+        self.get_room()
         with CaptureQueriesContext(connection) as many:
-            self.client.get(self.map_url())
+            self.get_room()
         self.assertEqual(len(few), len(many))
 
     # ---- 置き場所の保存 ----
@@ -1133,8 +1118,6 @@ class MindMapTests(TestCase):
     def test_bad_position_is_rejected(self):
         for x in ["abc", "nan", "inf", ""]:
             self.assertEqual(self.post_position(self.reading, x, "10").status_code, 400)
-        self.reading.refresh_from_db()
-        self.assertIsNone(self.reading.map_x)
 
     def test_position_does_not_change_updated_at(self):
         before = self.reading.updated_at
@@ -1145,66 +1128,41 @@ class MindMapTests(TestCase):
     def test_cannot_move_others_task(self):
         self.assertEqual(self.post_position(self.others_task, "10", "10").status_code, 404)
 
-    def test_position_needs_post(self):
-        url = reverse("task_map_position", args=[self.reading.pk])
-        self.assertEqual(self.client.get(url).status_code, 405)
-
     # ---- 名前だけで追加 ----
     def add(self, **data):
+        data.setdefault("room", str(self.research.pk))
         return self.client.post(reverse("task_map_create"), data, follow=True)
 
+    def test_add_a_top_task_to_the_room(self):
+        response = self.add(title="  学会発表  ", anchor="")
+        task = Task.objects.get(title="学会発表")
+        self.assertEqual((task.parent, task.category, task.on_map), (None, self.research, True))
+        self.assertRedirects(response, self.room_url() + f"?focus={task.pk}")
+        self.assertContains(response, "「学会発表」を置きました．")
+        self.assertContains(self.client.get(reverse("home")), "学会発表")  # ホームのやることにも出る
+
+    def test_add_a_top_task_to_no_category_room(self):
+        self.add(title="メモ", anchor="", room="none")
+        task = Task.objects.get(title="メモ")
+        self.assertEqual((task.category, task.on_map), (None, True))
+
     def test_add_inside_a_task(self):
-        response = self.add(title="  構成を考える  ", anchor=self.study.pk, relation="child", x="60", y="80")
-        self.assertRedirects(response, self.map_url())
+        response = self.add(title="構成を考える", anchor=self.study.pk, relation="child")
         task = Task.objects.get(title="構成を考える")
-        self.assertEqual((task.owner, task.parent, task.prerequisite), (self.me, self.study, None))
-        self.assertEqual((task.map_x, task.map_y), (60, 80))
+        self.assertEqual((task.parent, task.category), (self.study, self.research))
         self.assertContains(response, "「構成を考える」を「卒業研究」の中に足しました．")
 
-    def test_add_after_a_task_is_placed_next_to_it(self):
-        response = self.add(title="考察を書く", anchor=self.reading.pk, relation="after")
-        self.assertRedirects(response, self.map_url())
+    def test_add_after_a_child_is_placed_next_to_it(self):
+        self.add(title="考察を書く", anchor=self.reading.pk, relation="after")
         task = Task.objects.get(title="考察を書く")
-        # 文献調査が終わってからやる。文献調査と同じ段（卒業研究の中）に置くので、このマップに出る
         self.assertEqual((task.parent, task.prerequisite), (self.study, self.reading))
-        self.assertTrue(task.is_locked)
-        self.assertContains(response, "「考察を書く」を，「文献調査」が終わってからやるタスクとして足しました．")
-        self.assertIn("考察を書く", self.nodes())
 
-    def test_cannot_add_after_the_main_task(self):
-        response = self.add(title="x", anchor=self.study.pk, relation="after")
-        self.assertContains(response, "真ん中のメインタスクには「終わってからやる」でつなげられません．")
-        self.assertFalse(Task.objects.filter(title="x").exists())
-
-    def test_add_after_a_third_level_task(self):
-        # 3段目の中には入れられないが、「終わってからやる」なら同じ3段目に足せる
-        chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
-        self.add(title="第2章", anchor=chapter.pk, relation="after")
-        task = Task.objects.get(title="第2章")
-        self.assertEqual((task.parent, task.prerequisite), (self.reading, chapter))
-
-    def test_add_with_unknown_relation_is_rejected(self):
-        response = self.add(title="x", anchor=self.study.pk, relation="sideways")
-        self.assertContains(response, "つなぎ方を選んでください．")
-        self.assertFalse(Task.objects.filter(title="x").exists())
-
-    def test_new_map_creates_a_main_task(self):
-        response = self.add(title="国家試験")
-        task = Task.objects.get(title="国家試験")
-        self.assertIsNone(task.parent)
-        self.assertRedirects(response, self.map_url(task))
-        self.assertContains(response, "新しいマップ「国家試験」を作りました．")
-        # マップで作ったタスクも、ホームのやることに出る
-        self.assertContains(self.client.get(reverse("home")), "国家試験")
-
-    def test_add_without_title_is_rejected(self):
-        response = self.add(title="   ", anchor=self.study.pk, relation="child")
-        self.assertContains(response, "タスクの名前を入れてください．")
-        self.assertEqual(self.me.tasks.count(), 5)
-
-    def test_add_with_too_long_title_is_rejected(self):
-        self.add(title="あ" * 201)
-        self.assertEqual(self.me.tasks.count(), 5)
+    def test_add_after_a_top_task_makes_another_top_task_in_the_room(self):
+        response = self.add(title="論文を書く", anchor=self.study.pk, relation="after")
+        task = Task.objects.get(title="論文を書く")
+        self.assertEqual((task.parent, task.prerequisite, task.category, task.on_map), (None, self.study, self.research, True))
+        self.assertIn("論文を書く", self.nodes())
+        self.assertContains(response, "「論文を書く」を，「卒業研究」が終わってからやるタスクとして足しました．")
 
     def test_add_follows_the_depth_rule(self):
         chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)  # 3段目
@@ -1212,128 +1170,70 @@ class MindMapTests(TestCase):
         self.assertContains(response, "3段まで")
         self.assertFalse(Task.objects.filter(title="4段目").exists())
 
-    def test_cannot_add_to_others_task(self):
-        response = self.client.post(
-            reverse("task_map_create"), {"title": "x", "anchor": self.others_task.pk, "relation": "child"}
-        )
+    def test_add_rejects_bad_input(self):
+        self.assertContains(self.add(title="   ", anchor=""), "タスクの名前を入れてください．")
+        self.add(title="あ" * 201, anchor="")
+        self.assertContains(self.add(title="x", anchor=self.study.pk, relation="sideways"), "つなぎ方を選んでください．")
+        self.assertEqual(self.me.tasks.count(), 6)
+
+    def test_cannot_add_to_others_task_or_room(self):
+        response = self.client.post(reverse("task_map_create"), {"title": "x", "anchor": self.others_task.pk, "relation": "child"})
         self.assertEqual(response.status_code, 404)
+        other_room = str(self.other.categories.first().pk)
+        self.assertEqual(self.client.post(reverse("task_map_create"), {"title": "x", "room": other_room}).status_code, 404)
 
-    def test_add_without_position_uses_auto_layout(self):
-        # 「＋ タスクを足す」は場所を送らない。足したあとに戻るマップの画面で、空いている場所に置かれる
-        self.client.post(
-            reverse("task_map_create"), {"title": "場所なし", "anchor": self.reading.pk, "relation": "child"}
-        )
-        task = Task.objects.get(title="場所なし")
-        self.assertEqual(task.parent, self.reading)
-        self.assertIsNone(task.map_x)  # 足した時点では、まだ場所なし
-        self.assertIn("場所なし", self.nodes())
-        task.refresh_from_db()
-        self.assertIsNotNone(task.map_x)  # マップを開いたら、場所が決まって保存される
-
-    # ---- つなぎ方を切り替える ----
-    def relink(self, task, relation):
+    # ---- つながりを外す・切り替える ----
+    def post_link(self, name, task, relation):
         return self.client.post(
-            reverse("task_relink", args=[task.pk]), {"relation": relation, "next": self.map_url()}, follow=True
+            reverse(name, args=[task.pk]), {"relation": relation, "next": self.room_url()}, follow=True
         )
 
-    def test_switch_inside_to_after(self):
-        chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
-        response = self.relink(chapter, "child")
-        self.assertRedirects(response, self.map_url())
-        self.assertContains(response, "「第1章」を，「文献調査」が終わってからやる，に切り替えました．")
-        chapter.refresh_from_db()
-        # 文献調査の中から出て、文献調査と同じ段（卒業研究の中）に移る。だからこのマップに残る
-        self.assertEqual((chapter.parent, chapter.prerequisite), (self.study, self.reading))
-        self.assertIn("第1章", self.nodes())
-
-    def test_switch_after_to_inside(self):
-        response = self.relink(self.slides, "after")
-        self.assertContains(response, "「発表スライド」を，「文献調査」の中に入れる，に切り替えました．")
-        self.slides.refresh_from_db()
-        self.assertEqual((self.slides.parent, self.slides.prerequisite), (self.reading, None))
-
-    def test_cannot_switch_the_main_task_link_to_after(self):
-        response = self.relink(self.reading, "child")
-        self.assertContains(response, "真ん中のメインタスクとは，「終わってからやる」のつながりにできません．")
+    def test_unlink_parent_keeps_the_task_in_the_room(self):
+        response = self.post_link("task_unlink", self.reading, "child")
+        self.assertContains(response, "「文献調査」を「卒業研究」の中から出しました（この部屋に残ります）．")
         self.reading.refresh_from_db()
-        self.assertEqual(self.reading.parent, self.study)
-
-    def test_switch_follows_the_depth_rule(self):
-        # 文献調査の中に第1章（3段目）があるとき、文献調査を「発表スライド」の中に入れると4段になる
-        Task.objects.create(owner=self.me, title="第1章", parent=self.reading)
-        self.reading.prerequisite = self.slides
-        self.slides.prerequisite = None
-        self.slides.save()
-        self.reading.save()
-        response = self.relink(self.reading, "after")
-        self.assertContains(response, "3段まで")
-        self.reading.refresh_from_db()
-        self.assertEqual((self.reading.parent, self.reading.prerequisite), (self.study, self.slides))
-
-    def test_switch_when_there_is_nothing(self):
-        response = self.relink(self.study, "child")
-        self.assertContains(response, "切り替えるつながりがありません．")
-        response = self.relink(self.reading, "after")
-        self.assertContains(response, "切り替えるつながりがありません．")
-
-    def test_cannot_switch_others_task(self):
-        response = self.client.post(reverse("task_relink", args=[self.others_task.pk]), {"relation": "child"})
-        self.assertEqual(response.status_code, 404)
-
-    def test_switch_needs_post(self):
-        self.assertEqual(self.client.get(reverse("task_relink", args=[self.reading.pk])).status_code, 405)
-
-    def test_map_page_has_switch_button(self):
-        response = self.client.get(self.map_url())
-        self.assertContains(response, "data-relink-button")
-        self.assertContains(response, reverse("task_relink", args=[0]))
-
-    # ---- つながりを外す ----
-    def unlink(self, task, relation, **extra):
-        data = {"relation": relation}
-        data.update(extra)
-        return self.client.post(reverse("task_unlink", args=[task.pk]), data, follow=True)
-
-    def test_unlink_parent_makes_a_new_map(self):
-        response = self.unlink(self.reading, "child", next=self.map_url())
-        self.assertRedirects(response, self.map_url())
-        self.assertContains(response, "「文献調査」は別のマップになります（分類なし）．")
-        self.reading.refresh_from_db()
-        self.assertIsNone(self.reading.parent)
-        self.assertTrue(Task.objects.filter(pk=self.study.pk).exists())  # 相手のタスクは消えない
-        self.assertIn("文献調査", [item["title"] for item in response.context["menu"]])
+        self.assertEqual((self.reading.parent, self.reading.category, self.reading.on_map), (None, self.research, True))
+        self.assertTrue(self.nodes()["文献調査"]["top"])
 
     def test_unlink_prerequisite(self):
-        response = self.unlink(self.slides, "after")
-        self.assertContains(response, "前後のつながりを外しました．")
+        self.assertContains(self.post_link("task_unlink", self.slides, "after"), "前後のつながりを外しました．")
         self.slides.refresh_from_db()
         self.assertIsNone(self.slides.prerequisite)
 
-    def test_unlink_when_there_is_nothing(self):
-        response = self.unlink(self.study, "child")
-        self.assertContains(response, "外すつながりがありません．")
-        response = self.unlink(self.reading, "unknown")
-        self.assertContains(response, "外すつながりがありません．")
+    def test_switch_inside_a_top_task_to_after_keeps_it_in_the_room(self):
+        response = self.post_link("task_relink", self.reading, "child")
+        self.assertContains(response, "「文献調査」を，「卒業研究」が終わってからやる，に切り替えました．")
+        self.reading.refresh_from_db()
+        self.assertEqual((self.reading.parent, self.reading.prerequisite, self.reading.on_map), (None, self.study, True))
+        self.assertTrue(self.nodes()["文献調査"]["chained"])
 
-    def test_cannot_unlink_others_task(self):
-        response = self.client.post(reverse("task_unlink", args=[self.others_task.pk]), {"relation": "child"})
-        self.assertEqual(response.status_code, 404)
+    def test_switch_after_to_inside(self):
+        self.post_link("task_relink", self.slides, "after")
+        self.slides.refresh_from_db()
+        self.assertEqual((self.slides.parent, self.slides.prerequisite), (self.reading, None))
+
+    def test_unlink_and_switch_need_something_to_change(self):
+        self.assertContains(self.post_link("task_unlink", self.study, "child"), "外すつながりがありません．")
+        self.assertContains(self.post_link("task_relink", self.study, "after"), "切り替えるつながりがありません．")
+
+    def test_cannot_change_others_links(self):
+        for name in ["task_unlink", "task_relink"]:
+            response = self.client.post(reverse(name, args=[self.others_task.pk]), {"relation": "child"})
+            self.assertEqual(response.status_code, 404)
 
     def test_unlink_ignores_outside_next(self):
         response = self.client.post(
-            reverse("task_unlink", args=[self.reading.pk]),
-            {"relation": "child", "next": "https://evil.example/"},
+            reverse("task_unlink", args=[self.reading.pk]), {"relation": "child", "next": "https://evil.example/"}
         )
         self.assertRedirects(response, reverse("task_map"), fetch_redirect_response=False)
 
-    def test_link_from_map_returns_to_map(self):
-        # 線を引いてつないだあと（#29 の task_link）、マップに戻ってくる
+    def test_link_from_map_returns_to_the_room(self):
         summary = Task.objects.create(owner=self.me, title="要約", parent=self.study)
         response = self.client.post(
             reverse("task_link", args=[summary.pk]),
-            {"target": self.reading.pk, "relation": "child", "next": self.map_url()},
+            {"target": self.reading.pk, "relation": "child", "next": self.room_url()},
         )
-        self.assertRedirects(response, self.map_url())
+        self.assertRedirects(response, self.room_url())
         summary.refresh_from_db()
         self.assertEqual(summary.parent, self.reading)
 

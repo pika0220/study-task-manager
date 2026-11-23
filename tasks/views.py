@@ -17,7 +17,7 @@ from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, UpdateView
 
 from .forms import SourceForm, TaskForm
-from .models import Source, Task
+from .models import Category, Source, Task
 
 
 @login_required  # ログインしていない人はログイン画面に送られる
@@ -425,59 +425,60 @@ def _redirect_next(request, default):
     return redirect(default)
 
 
-# ---- マインドマップ（Issue #30）----
-# メインタスク（親のないタスク）ごとに1枚のマップを作る。
-# メインタスクを真ん中に置き、子タスク・孫タスクを枝のように外へ広げる。
+# ---- マインドマップ（Issue #30・#36）----
+# 分類ごとに1つの「部屋」（マップ）がある。部屋には、その分類のいちばん上のタスクを「棚」から選んで置く。
+# 置いたタスクは、中の作業（子・孫）と一緒に、木の形で外へ広がる。真ん中には何も置かない。
 
 MAP_LIMIT = 5000  # 置ける場所の上限（px）。ありえない大きな数字を保存しないため
-MAP_CENTER = 800  # メインタスクを置く場所（点の中心）。まわりに広げられるよう、紙の真ん中あたりにする
+MAP_CENTER = 800  # 最初に置くタスクの場所（点の中心）。まわりに広げられるよう、紙の真ん中あたりにする
 MAP_RADIUS = 200  # 自動で並べるとき、1段外へ広がるごとに離す距離
+MAP_TREE_GAP = 80  # 新しい木を、今ある点の下に置くときの、縦のすきま（px）
 MAP_NODE_WIDTH = 130  # 点の大きさ（task_map.html の .map-node と同じ）
 MAP_NODE_HEIGHT = 44
+NO_CATEGORY = "none"  # 「分類なし」の部屋の URL での名前（/map/room/none/）
 
 
-def _map_tree(root, children):
-    """メインタスクと、その下の未完了のタスク（子・孫）を、上から順に並べたリストを返す。"""
-    result = [root]
-    for child in children[root.pk]:
+def _map_tree(top, children):
+    """いちばん上のタスクと、その下の未完了のタスク（子・孫）を、上から順に並べたリストを返す。"""
+    result = [top]
+    for child in children[top.pk]:
         if not child.is_done:
             result += _map_tree(child, children)
     return result
 
 
-def _map_layout_children(root, shown):
+def _map_layout_children(shown):
     """マップの上で「どの点から伸ばすか」を決める。{伸ばす元の番号: [タスク, …]} と、前後でつないだタスクの番号の集合を返す。
 
-    ふつうは親から伸ばす。ただし、先にやることが「同じ親の中のタスク（きょうだい）」のときは、
-    先にやることの先に伸ばす（メインタスク → 文献調査 → 考察を書く のように、順番が一列に見える）。
+    ふつうは親から伸ばす（親がいなければ、自分がひとつの木のいちばん上：キーは None）。
+    ただし、先にやることが「同じ親の中のタスク（きょうだい）」のときは、先にやることの先に伸ばす
+    （卒業研究 → 文献調査 → 考察を書く のように、順番が一列に見える）。いちばん上のタスクどうしでも同じ。
     データ（親子・前後）は変えず、マップでの見せ方だけを変える。
     """
     by_pk = {t.pk: t for t in shown}
     layout_children = defaultdict(list)
     chained = set()
     for task in shown:
-        if task.pk == root.pk:
-            continue
         before = by_pk.get(task.prerequisite_id)
         if before is not None and before.parent_id == task.parent_id:
             layout_children[before.pk].append(task)
             chained.add(task.pk)
-        else:
+        elif task.parent_id in by_pk:
             layout_children[task.parent_id].append(task)
+        else:
+            layout_children[None].append(task)
     return layout_children, chained
 
 
-def _radial_layout(root, shown, children):
+def _radial_layout(shown, children):
     """マップの上での置き場所（点の左上）を {タスクの番号: (x, y)} で返す（保存はしない）。
 
-    children：どの点から伸ばすか（_map_layout_children で決めたもの）。
+    children：どの点から伸ばすか（_map_layout_children で決めたもの）。children[None] が木のいちばん上。
 
-    1. まず「理想の場所」を決める。メインタスクを真ん中に置き、まわり（360度）を子タスクで分け合う。
-       その先のタスクは、元の点から同じ距離だけ外向きに並ぶ。先が多いほど広い角度をもらう。
-    2. 置き場所が保存されているタスクは、その場所のまま。
-       まだ決まっていないタスクは「親の今の場所 ＋ 理想の場所での親からのずれ」に置く。
-       こうすると、親を動かしたあとに足した子タスクも、親のそばに出てくる。
-    3. その場所がほかの点と重なるときは、親のまわりを少しずつ回して、空いている場所を探す。
+    1. 置き場所が保存されている点は、その場所のまま。
+    2. まだ決まっていない木のいちばん上は、今ある点のいちばん下より、さらに下に置く（縦に積む）。
+    3. 中の作業は「理想の場所」（元の点のまわり 360度 を分け合い、その先は外向きに同じ距離ずつ）を基本に、
+       ほかの点と重なるときは、元の点のまわりを少しずつ回して、空いている場所を探す。
     """
     shown_ids = {t.pk for t in shown}
 
@@ -489,46 +490,45 @@ def _radial_layout(root, shown, children):
         branch = kids(task)
         return sum(leaves(k) for k in branch) if branch else 1
 
-    ideal = {}
-
-    def place_ideal(task, level, start, end, position):
-        """task を position に置き、その先のタスクを、もらった角度（start～end）の中に広げる。"""
-        ideal[task.pk] = position
-        if level > 0:
-            # 真ん中より外のタスクは、元の点から見て外向き ±60度 の中だけに広げる
-            # （広すぎると、先のタスクが真ん中のほうへ戻ってきてしまうため）
-            middle = (start + end) / 2
-            half = min((end - start) / 2, math.pi / 3)
-            start, end = middle - half, middle + half
-        branch = kids(task)
-        total = sum(leaves(k) for k in branch)
-        angle = start
-        for k in branch:
-            span = (end - start) * leaves(k) / total
-            direction = angle + span / 2
-            # 先のタスクは、元の点から同じ距離（MAP_RADIUS）だけ離れたところに置く
-            child = (position[0] + MAP_RADIUS * math.cos(direction), position[1] + MAP_RADIUS * math.sin(direction))
-            place_ideal(k, level + 1, angle, angle + span, child)
-            angle += span
-
-    # 左（-180度）から1周。子が1つなら右、2つなら上と下に出る（スマホの縦長の画面に合う）
-    place_ideal(root, 0, -math.pi, math.pi, (MAP_CENTER, MAP_CENTER))
-
-    # 置き場所が保存されている点を先に置いておく（新しい点が、これらと重ならないようにするため）
     centers = {
         t.pk: (t.map_x + MAP_NODE_WIDTH / 2, t.map_y + MAP_NODE_HEIGHT / 2)
         for t in shown
         if t.map_x is not None and t.map_y is not None
     }
 
-    def overlaps(point):
+    def overlaps(point, gap_x=MAP_NODE_WIDTH + 12, gap_y=MAP_NODE_HEIGHT + 12):
         x, y = point
-        return any(
-            abs(x - cx) < MAP_NODE_WIDTH + 12 and abs(y - cy) < MAP_NODE_HEIGHT + 12 for cx, cy in centers.values()
-        )
+        return any(abs(x - cx) < gap_x and abs(y - cy) < gap_y for cx, cy in centers.values())
+
+    def free_top_spot(top_pks, rise):
+        """木のいちばん上を置く場所。スマホの縦長の画面に合うよう、今ある点の「下」に縦に積む。
+
+        top_pks：木のいちばん上の番号。横の位置は、その中で場所が決まっている、いちばん下の木にそろえる。
+        rise：新しい木が、いちばん上のタスクより上に広がる高さ（中の作業が上に出る分）。
+        """
+        if not centers:
+            return (MAP_CENTER, MAP_CENTER)  # 部屋で最初の木は、紙の真ん中あたり
+        lowest_top = max((centers[pk] for pk in top_pks if pk in centers), key=lambda c: c[1], default=None)
+        x = lowest_top[0] if lowest_top else MAP_CENTER
+        bottom = max(cy for _, cy in centers.values()) + MAP_NODE_HEIGHT / 2  # 今ある点の、いちばん下のふち
+        return (x, bottom + MAP_TREE_GAP + MAP_NODE_HEIGHT / 2 + rise)
+
+    def rise_of(top, offset_of):
+        """木のいちばん上から見て、中の作業がどれだけ上に出るか（px）。理想の場所で数える。"""
+        highest = 0
+
+        def walk(task, y):
+            nonlocal highest
+            for k in kids(task):
+                ky = y + offset_of[k.pk][1]
+                highest = min(highest, ky)
+                walk(k, ky)
+
+        walk(top, 0)
+        return -highest
 
     def free_spot(parent_center, offset):
-        """親から offset だけ離れた場所を基本に、重ならない場所を探す。"""
+        """元の点から offset だけ離れた場所を基本に、重ならない場所を探す。"""
         px, py = parent_center
         dx, dy = offset
         for ring in range(4):  # 1周しても見つからなければ、少し遠くでもう1周
@@ -541,64 +541,123 @@ def _radial_layout(root, shown, children):
                     return (px + rx, py + ry)
         return (px + dx, py + dy)  # どうしても空きがなければ、重なってもよいので基本の場所に置く
 
-    def place_actual(task, parent):
-        if task.pk not in centers:
-            if parent is None:
-                centers[task.pk] = ideal[task.pk]
-            else:
-                ix, iy = ideal[task.pk]
-                qx, qy = ideal[parent.pk]
-                offset = (ix - qx, iy - qy)
-                if offset == (0, 0):
-                    offset = (MAP_RADIUS, 0)
-                centers[task.pk] = free_spot(centers[parent.pk], offset)
-        for k in kids(task):
-            place_actual(k, task)
+    def offsets(task, level, start, end, result):
+        """task から見た、中の作業の理想のずれ {番号: (dx, dy)} を作る（元の点からの相対位置）。"""
+        if level > 0:
+            # 木のいちばん上より外は、元の点から見て外向き ±60度 の中だけに広げる
+            middle = (start + end) / 2
+            half = min((end - start) / 2, math.pi / 3)
+            start, end = middle - half, middle + half
+        branch = kids(task)
+        total = sum(leaves(k) for k in branch)
+        angle = start
+        for k in branch:
+            span = (end - start) * leaves(k) / total
+            direction = angle + span / 2
+            result[k.pk] = (MAP_RADIUS * math.cos(direction), MAP_RADIUS * math.sin(direction))
+            offsets(k, level + 1, angle, angle + span, result)
+            angle += span
 
-    place_actual(root, None)
+    def place(task, offset_of):
+        for k in kids(task):
+            if k.pk not in centers:
+                centers[k.pk] = free_spot(centers[task.pk], offset_of[k.pk])
+            place(k, offset_of)
+
+    root_pks = [t.pk for t in children[None]]
+    for top in children[None]:
+        if top.pk not in shown_ids:
+            continue
+        offset_of = {}
+        # 左（-180度）から1周。中の作業が1つなら右、2つなら上と下に出る（スマホの縦長の画面に合う）
+        offsets(top, 0, -math.pi, math.pi, offset_of)
+        if top.pk not in centers:
+            centers[top.pk] = free_top_spot(root_pks, rise_of(top, offset_of))
+        place(top, offset_of)
+
     return {
         pk: (min(max(cx - MAP_NODE_WIDTH / 2, 0), MAP_LIMIT), min(max(cy - MAP_NODE_HEIGHT / 2, 0), MAP_LIMIT))
         for pk, (cx, cy) in centers.items()
     }
 
 
-@login_required
-def task_map(request, pk=None):
-    """マップ画面。pk：真ん中に置くメインタスクの番号。点と線は task_map.js が描く。
+def _room_key(category_id):
+    """分類の番号から、部屋の URL での名前を作る（分類なしは "none"）。"""
+    return str(category_id) if category_id else NO_CATEGORY
 
-    /map/ で開いたときは、いちばん上のメインタスクのマップへ移る。
-    子タスクの番号で開いたときは、そのメインタスクのマップへ移る。
+
+def _room_redirect(task, focus=False):
+    """そのタスクがいる部屋（いちばん上のタスクの分類の部屋）へ移る。
+
+    focus=True：置いた・足したタスクを、画面の見える場所に出す（?focus=番号 を付ける。task_map.js が読む）。
+    付けないと、前に見ていた場所に戻るので、離れた場所に置かれたタスクが画面の外になってしまう。
     """
+    url = reverse("task_map_room", kwargs={"key": _room_key(task.root().category_id)})
+    if focus:
+        url += f"?focus={task.pk}"
+    return redirect(url)
+
+
+@login_required
+def task_map(request):
+    """/map/ で開いたとき：タスクを置いてある部屋（なければ、タスクのある部屋・最初の分類）へ移る。"""
+    tops = [t for t in request.user.tasks.filter(parent=None, is_done=False)]
+    placed = [t for t in tops if t.on_map]
+    first = (placed or tops or [None])[0]
+    if first is not None:
+        return redirect("task_map_room", key=_room_key(first.category_id))
+    category = request.user.categories.first()
+    if category is not None:
+        return redirect("task_map_room", key=_room_key(category.pk))
+    return redirect("task_map_room", key=NO_CATEGORY)
+
+
+@login_required
+def task_map_root(request, pk):
+    """タスクの番号で開いたとき（進み具合の 🗺️ など）：そのタスクがいる部屋へ移る。"""
+    return _room_redirect(get_object_or_404(request.user.tasks, pk=pk))
+
+
+@login_required
+def task_map_room(request, key):
+    """分類ごとの部屋（マップ）。置いたタスクを点、つながりを線で見せる。点と線は task_map.js が描く。"""
+    if key == NO_CATEGORY:
+        category = None
+    else:
+        try:
+            category = request.user.categories.get(pk=int(key))
+        except (ValueError, Category.DoesNotExist):
+            raise Http404
+    category_id = category.pk if category else None
+
     # 自分のタスクを1回の問い合わせでまとめて読み、親子の形は Python の中で組み立てる
     tasks = list(request.user.tasks.select_related("prerequisite"))
-    by_id = {t.pk: t for t in tasks}
     children = defaultdict(list)
     for task in tasks:
         if task.parent_id:
             children[task.parent_id].append(task)
+    tops = [t for t in tasks if t.parent_id is None and not t.is_done]
 
-    # 切り替えメニューに出すメインタスク（未完了だけ）。枝のあるものを先に、あとは重要度・締切の順のまま
-    roots = [t for t in tasks if t.parent_id is None and not t.is_done]
-    menu = [{"pk": t.pk, "title": t.title, "count": len(_map_tree(t, children)) - 1} for t in roots]
-    menu.sort(key=lambda item: item["count"] == 0)
+    # 部屋の切り替えメニュー：自分の分類（作った順）と、いちばん上に分類なしのタスクがあれば「分類なし」
+    counts = defaultdict(int)
+    for t in tops:
+        counts[t.category_id] += 1
+    rooms = [
+        {"key": _room_key(c.pk), "name": c.name, "count": counts[c.pk]}
+        for c in request.user.categories.all()
+    ]
+    if counts[None] or category is None:
+        rooms.append({"key": NO_CATEGORY, "name": "分類なし", "count": counts[None]})
 
-    if pk is None:
-        if menu:
-            return redirect("task_map_root", pk=menu[0]["pk"])
-        return render(request, "tasks/task_map.html", {"nodes": [], "menu": [], "root": None})
+    in_room = [t for t in tops if t.category_id == category_id]
+    placed = [t for t in in_room if t.on_map]
+    shelf = [t for t in in_room if not t.on_map]
+    shown = []
+    for top in placed:
+        shown += _map_tree(top, children)
 
-    task = by_id.get(pk)
-    if task is None:
-        raise Http404
-    root = task
-    while root.parent_id is not None:
-        root = by_id[root.parent_id]
-    if root.pk != pk:
-        return redirect("task_map_root", pk=root.pk)
-
-    shown = _map_tree(root, children)
-    layout_children, chained = _map_layout_children(root, shown)
-    positions = _radial_layout(root, shown, layout_children)
+    layout_children, chained = _map_layout_children(shown)
+    positions = _radial_layout(shown, layout_children)
     # 自動で決めた場所は、すぐに保存しておく。保存しないと、タスクを足したりつないだりするたびに
     # 並べ直されて、点が勝手に動いてしまうため。bulk_update：まとめて1回の問い合わせで保存する
     unplaced = [t for t in shown if t.map_x is None or t.map_y is None]
@@ -608,17 +667,15 @@ def task_map(request, pk=None):
         Task.objects.bulk_update(unplaced, ["map_x", "map_y"])
 
     shown_ids = {t.pk for t in shown}
-    # 「＋ タスクを足す」で選べる、つなぐ先（このマップのすべての点）。
-    # 何段目か（level）と真ん中か（is_root）も渡し、選べないつなぎ方を画面で押せなくする
-    # 何段目かは、上から順に並んだ shown（親が必ず子より先）をたどって数える。
-    # t.depth() を使うと、点ごとにデータベースへ親を聞きに行ってしまうため
+    # 「＋ タスク」で選べる、つなぐ先（この部屋のすべての点）。何段目か（level）も渡し、
+    # 3段目の「中」には入れられないことを画面で示す。何段目かは、上から順に並んだ shown（親が必ず子より先）で数える
     levels = {}
-    parent_choices = []
+    anchors = []
     for t in shown:
-        level = 1 if t.pk == root.pk else levels[t.parent_id] + 1
+        level = 1 if t.parent_id is None else levels[t.parent_id] + 1
         levels[t.pk] = level
         label = ("　" * (level - 1)) + ("└ " if level > 1 else "") + t.title
-        parent_choices.append({"pk": t.pk, "label": label, "level": level, "is_root": t.pk == root.pk})
+        anchors.append({"pk": t.pk, "label": label, "level": level})
     nodes = [
         {
             "id": t.pk,
@@ -628,9 +685,9 @@ def task_map(request, pk=None):
             "importance": t.importance,
             "locked": t.is_locked and not t.is_done,
             "done": t.is_done,
-            "root": t.pk == root.pk,
+            "top": t.parent_id is None,  # いちばん上のタスク（少し目立たせる）
             "url": reverse("task_detail", args=[t.pk]),
-            # 線を引くのは、相手もこのマップに出ているときだけ
+            # 線を引くのは、相手もこの部屋に出ているときだけ
             "parent": t.parent_id if t.parent_id in shown_ids else None,
             "prerequisite": t.prerequisite_id if t.prerequisite_id in shown_ids else None,
             # True：先にやること（同じ親の中のタスク）の先に描く。親との線は引かない
@@ -641,7 +698,15 @@ def task_map(request, pk=None):
     return render(
         request,
         "tasks/task_map.html",
-        {"nodes": nodes, "menu": menu, "root": root, "parent_choices": parent_choices},
+        {
+            "nodes": nodes,
+            "rooms": rooms,
+            "room_key": _room_key(category_id),
+            "room_name": category.name if category else "分類なし",
+            "anchors": anchors,
+            "placed": placed,
+            "shelf": shelf,
+        },
     )
 
 
@@ -671,15 +736,43 @@ def task_map_position(request, pk):
     return JsonResponse({"ok": True, "x": x, "y": y})
 
 
+def _clear_positions(user, top):
+    """いちばん上のタスクと、その中の作業の置き場所を消す（次に開いたときに、空いている場所へ自動で並べる）。"""
+    user.tasks.filter(Q(pk=top.pk) | Q(parent=top) | Q(parent__parent=top)).update(map_x=None, map_y=None)
+
+
+@login_required
+@require_POST
+def task_map_place(request, pk):
+    """棚のタスクを部屋に置く。中の作業も一緒に出る。"""
+    top = get_object_or_404(request.user.tasks, pk=pk, parent=None)
+    _clear_positions(request.user, top)  # 前に置いていた場所ではなく、今の部屋の空いている場所に並べる
+    top.on_map = True
+    top.save(update_fields=["on_map"])
+    messages.success(request, f"📦 → 🗺️ 「{top.title}」を置きました．")
+    return _room_redirect(top, focus=True)
+
+
+@login_required
+@require_POST
+def task_map_stow(request, pk):
+    """部屋に置いたタスクを棚にしまう。タスクそのものや、つながりは変えない。"""
+    top = get_object_or_404(request.user.tasks, pk=pk, parent=None)
+    top.on_map = False
+    top.save(update_fields=["on_map"])
+    messages.success(request, f"🗺️ → 📦 「{top.title}」を棚にしまいました．")
+    return _room_redirect(top)
+
+
 @login_required
 @require_POST
 def task_map_create(request):
-    """マップから、名前だけでタスクを足す。締切などはあとで詳細画面から入れる。
+    """部屋から、名前だけでタスクを足す。締切などはあとで詳細画面から入れる。
 
     anchor（どのタスクに）と relation（つなぎ方）で、足す場所を決める。
+      - anchor なし：この部屋の分類で、いちばん上のタスクとして置く（room：部屋の名前）
       - relation="child"：anchor の中に入れる（anchor の子タスク）
       - relation="after"：anchor が終わってからやる。anchor と同じ段（anchor の親の中）に置く
-    anchor がなければ、新しいメインタスク（新しいマップ）になる。
     """
     title = (request.POST.get("title") or "").strip()
     max_length = Task._meta.get_field("title").max_length
@@ -699,17 +792,25 @@ def task_map_create(request):
         error = "タスクの名前を入れてください．"
     elif len(title) > max_length:
         error = f"タスクの名前は{max_length}文字以内にしてください．"
-    elif anchor and relation not in LINK_FIELDS:
+    elif anchor is None:
+        room = request.POST.get("room") or NO_CATEGORY
+        if room != NO_CATEGORY:
+            try:
+                task.category = request.user.categories.get(pk=int(room))
+            except (ValueError, Category.DoesNotExist):
+                raise Http404
+        task.on_map = True
+    elif relation not in LINK_FIELDS:
         error = "つなぎ方を選んでください．"
-    elif anchor and relation == "after" and anchor.parent_id is None:
-        # 真ん中のメインタスクには親がないので、その「となり」に置けない（置くと別のマップになってしまう）
-        error = "真ん中のメインタスクには「終わってからやる」でつなげられません．「中に入れる」を選んでください．"
-    elif anchor:
-        if relation == "child":
-            task.parent = anchor
-        else:
-            task.parent = anchor.parent
-            task.prerequisite = anchor
+    elif relation == "child":
+        task.parent = anchor
+    else:
+        task.parent = anchor.parent
+        task.prerequisite = anchor
+        if anchor.parent_id is None:
+            # いちばん上のタスクのあと → 自分もいちばん上のタスク。同じ部屋に置く
+            task.category = anchor.category
+            task.on_map = True
     if error is None:
         try:
             task.full_clean()  # 3段まで など、ほかの画面と同じルールで確かめる
@@ -717,25 +818,24 @@ def task_map_create(request):
             error = validation_error.messages[0]
     if error:
         messages.error(request, error)
+        if anchor is not None:
+            return _room_redirect(anchor)
+        return redirect("task_map_room", key=request.POST.get("room") or NO_CATEGORY)
+    task.save()
+    if anchor is None:
+        messages.success(request, f"「{title}」を置きました．")
+    elif relation == "child":
+        messages.success(request, f"「{title}」を「{anchor.title}」の中に足しました．")
     else:
-        task.save()
-        if anchor is None:
-            messages.success(request, f"新しいマップ「{title}」を作りました．")
-            return redirect("task_map_root", pk=task.pk)
-        if relation == "child":
-            messages.success(request, f"「{title}」を「{anchor.title}」の中に足しました．")
-        else:
-            messages.success(request, f"「{title}」を，「{anchor.title}」が終わってからやるタスクとして足しました．")
-    if anchor:
-        return redirect("task_map_root", pk=anchor.pk)  # 子タスクの番号でも、メインタスクのマップに移る
-    return redirect("task_map")
+        messages.success(request, f"「{title}」を，「{anchor.title}」が終わってからやるタスクとして足しました．")
+    return _room_redirect(task, focus=True)
 
 
 @login_required
 @require_POST
 def task_unlink(request, pk):
     """マップの線を押して、つながり（親子・前後）を外す。タスクそのものは消さない。"""
-    task = get_object_or_404(request.user.tasks.select_related("parent", "prerequisite"), pk=pk)
+    task = get_object_or_404(request.user.tasks.select_related("parent", "prerequisite", "category"), pk=pk)
     relation = request.POST.get("relation")
     field = LINK_FIELDS.get(relation)
     other = getattr(task, field) if field else None
@@ -743,15 +843,14 @@ def task_unlink(request, pk):
         messages.error(request, "外すつながりがありません．")
     else:
         setattr(task, field, None)
-        task.save(update_fields=[field, "updated_at"])
+        fields = [field, "updated_at"]
         if relation == "child":
-            # 親から出たタスクはメインタスクになるので、このマップからは消えて、自分のマップを持つ
-            # 分類は、中にいたときの分類（いちばん上のタスクの分類）のまま
-            category = f"分類：{task.category.name} のまま" if task.category_id else "分類なし"
-            messages.success(
-                request,
-                f"「{task.title}」を「{other.title}」の中から出しました．「{task.title}」は別のマップになります（{category}）．",
-            )
+            # 親から出たタスクは、いちばん上のタスクになる。分類はそのままなので、同じ部屋に置いたままにする
+            task.on_map = True
+            fields.append("on_map")
+        task.save(update_fields=fields)
+        if relation == "child":
+            messages.success(request, f"「{task.title}」を「{other.title}」の中から出しました（この部屋に残ります）．")
         else:
             messages.success(request, f"「{task.title}」と「{other.title}」の前後のつながりを外しました．")
     return _redirect_next(request, "task_map")
@@ -763,7 +862,8 @@ def task_relink(request, pk):
     """マップの線を押して、つなぎ方を切り替える（📁 中に入れる ⇔ 🔒 終わってからやる）。
 
     relation：今のつなぎ方。
-      - "child" → 🔒：親（B）が終わってからやる形にする。マップから消えないよう、B と同じ段（B の親の中）に移す
+      - "child" → 🔒：親（B）が終わってからやる形にする。B と同じ段（B の親の中）に移す。
+        B がいちばん上のタスクなら、自分もいちばん上のタスクになって、同じ部屋に残る
       - "after" → 📁：先にやること（B）の中に入れる
     """
     task = get_object_or_404(request.user.tasks.select_related("parent__parent", "prerequisite"), pk=pk)
@@ -771,12 +871,11 @@ def task_relink(request, pk):
     error = None
     if relation == "child" and task.parent is not None:
         other = task.parent
-        if other.parent_id is None:
-            error = "真ん中のメインタスクとは，「終わってからやる」のつながりにできません．"
-        else:
-            task.parent = other.parent
-            task.prerequisite = other
-            done_message = f"「{task.title}」を，「{other.title}」が終わってからやる，に切り替えました．"
+        task.parent = other.parent
+        task.prerequisite = other
+        if task.parent is None:
+            task.on_map = True
+        done_message = f"「{task.title}」を，「{other.title}」が終わってからやる，に切り替えました．"
     elif relation == "after" and task.prerequisite is not None:
         other = task.prerequisite
         task.prerequisite = None
@@ -792,27 +891,34 @@ def task_relink(request, pk):
     if error:
         messages.error(request, error)
     else:
-        task.save(update_fields=["parent", "prerequisite", "updated_at"])
+        task.save(update_fields=["parent", "prerequisite", "on_map", "updated_at"])
         messages.success(request, done_message)
     return _redirect_next(request, "task_map")
 
 
 @login_required
 @require_POST
-def task_map_arrange(request, pk):
-    """マップの点の置き場所を消して、自動で並べ直す（このマップのタスクだけ）。"""
-    root = get_object_or_404(request.user.tasks, pk=pk, parent=None)
-    # 入れ子は3段までなので、メインタスク・子・孫で、このマップのタスクが全部そろう
-    request.user.tasks.filter(Q(pk=root.pk) | Q(parent=root) | Q(parent__parent=root)).update(map_x=None, map_y=None)
+def task_map_arrange(request, key):
+    """部屋の点の置き場所を消して、自動で並べ直す（この部屋に置いたタスクだけ）。"""
+    tops = request.user.tasks.filter(parent=None, on_map=True)
+    if key == NO_CATEGORY:
+        tops = tops.filter(category=None)
+    else:
+        try:
+            tops = tops.filter(category=request.user.categories.get(pk=int(key)))
+        except (ValueError, Category.DoesNotExist):
+            raise Http404
+    for top in tops:
+        _clear_positions(request.user, top)
     messages.success(request, "点を自動で並べ直しました．")
-    return redirect("task_map_root", pk=root.pk)
+    return redirect("task_map_room", key=key)
 
 
 # ---- 進み具合（F-06）----
 
 @login_required
 def progress(request):
-    """進み具合の画面。全体・分類ごと・メインタスクごとに「何件中何件終わったか」を見せる。
+    """進み具合の画面。全体・分類ごと・中の作業があるタスクごとに「何件中何件終わったか」を見せる。
 
     数えるのは「中の作業がないタスク」（子タスクのないタスク）だけ。
     「卒業研究」のようなまとめ役のタスクは、中の作業を数えれば足りるので、二重に数えない。
@@ -852,7 +958,7 @@ def progress(request):
     if by_category.get(None):
         categories.append({"name": "分類なし", **summary(by_category[None])})
 
-    # メインタスクごと：中の作業があって、まだ終わっていないメインタスク
+    # 中の作業があるタスクごと：中の作業があって、まだ終わっていない、いちばん上のタスク
     def root_of(task):
         while task.parent_id is not None:
             task = by_id[task.parent_id]
