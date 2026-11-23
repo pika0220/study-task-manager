@@ -2,7 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.db import models
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 
@@ -180,13 +180,33 @@ class Task(models.Model):
         """先にやることが終わっていないとき True（まだ取りかかれない）。"""
         return self.prerequisite_id is not None and not self.prerequisite.is_done
 
+    def root(self):
+        """いちばん上のタスク（親のないタスク）を返す。自分がいちばん上なら自分。"""
+        node = self
+        while node.parent_id is not None:
+            node = node.parent
+        return node
+
     def save(self, *args, **kwargs):
         # 完了にしたら日時を記録し、未完了に戻したら消す
         if self.is_done and self.done_at is None:
             self.done_at = timezone.now()
         elif not self.is_done:
             self.done_at = None
+        # 分類は、いちばん上のタスクの分類にそろえる（Issue #34）。
+        # 親がいるタスクの分類は、自分では決めず、いちばん上のタスクの分類になる。
+        if self.parent_id is not None:
+            self.category_id = self.root().category_id
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "category" not in update_fields:
+                kwargs["update_fields"] = [*update_fields, "category"]
         super().save(*args, **kwargs)
+        # 自分の中の作業（子・孫）の分類も、自分にそろえる。入れ子は3段までなので、子と孫で全部
+        (
+            Task.objects.filter(Q(parent=self) | Q(parent__parent=self))
+            .exclude(category_id=self.category_id)
+            .update(category_id=self.category_id)
+        )
 
     def due_status(self, now=None):
         """締切の状態を返す。画面で色を変えるのに使う。

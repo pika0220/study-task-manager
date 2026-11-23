@@ -360,15 +360,36 @@ def _own_task_from_param(request, value):
     return get_object_or_404(request.user.tasks, pk=pk)
 
 
+def _link_notes(source, target, relation):
+    """つないだら何が変わるかを、短い記号の形で返す（選ぶ画面に出す）。
+
+    - 今あるつながりを入れかえるとき：「⚠ 今：「A」の中 → 入れかえ」
+    - 中に入れると分類が変わるとき：「分類：授業 → 研究（中の作業もそろう）」
+    """
+    notes = []
+    if relation == "child":
+        if source.parent_id and source.parent_id != target.pk:
+            notes.append(f"⚠ 今：「{source.parent.title}」の中 → 入れかえ")
+        # 分類はいちばん上のタスクにそろっているので、相手の分類が、入れたあとの分類になる
+        if source.category_id != target.category_id:
+            before = source.category.name if source.category else "分類なし"
+            after = target.category.name if target.category else "分類なし"
+            notes.append(f"分類：{before} → {after}（中の作業もそろう）")
+    else:
+        if source.prerequisite_id and source.prerequisite_id != target.pk:
+            notes.append(f"⚠ 今：「{source.prerequisite.title}」が終わってから → 入れかえ")
+    return notes
+
+
 @login_required
 def task_link_options(request, pk):
-    """カードを落としたときに、選べるつながりと、選べない理由を JSON で返す。"""
-    source = get_object_or_404(request.user.tasks, pk=pk)
+    """カードを落としたときに、選べるつながりと、選べない理由・変わることを JSON で返す。"""
+    source = get_object_or_404(request.user.tasks.select_related("parent", "prerequisite", "category"), pk=pk)
     target = _own_task_from_param(request, request.GET.get("target"))
     result = {"source": source.title, "target": target.title}
     for relation in LINK_FIELDS:
         ok, reason = _check_link(source, target, relation)
-        result[relation] = {"ok": ok, "reason": reason}
+        result[relation] = {"ok": ok, "reason": reason, "notes": _link_notes(source, target, relation) if ok else []}
     return JsonResponse(result)
 
 
@@ -725,8 +746,11 @@ def task_unlink(request, pk):
         task.save(update_fields=[field, "updated_at"])
         if relation == "child":
             # 親から出たタスクはメインタスクになるので、このマップからは消えて、自分のマップを持つ
+            # 分類は、中にいたときの分類（いちばん上のタスクの分類）のまま
+            category = f"分類：{task.category.name} のまま" if task.category_id else "分類なし"
             messages.success(
-                request, f"「{task.title}」を「{other.title}」の中から出しました．「{task.title}」は別のマップになります．"
+                request,
+                f"「{task.title}」を「{other.title}」の中から出しました．「{task.title}」は別のマップになります（{category}）．",
             )
         else:
             messages.success(request, f"「{task.title}」と「{other.title}」の前後のつながりを外しました．")
