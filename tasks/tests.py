@@ -7,16 +7,42 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.core.exceptions import FieldError, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.db import connection
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from PIL import Image
 from pathlib import Path
 
-from .models import Feedback, Source, Task
+from .encryption import decrypt_bytes, is_encrypted_text
+from .models import Feedback, Source, Task, category_named
 from .views import GUIDE_CHAPTERS
+
+
+
+# タイトルや分類の名前は暗号化して保存している（Issue #49）ので、データベースでは「タイトルが○○」と探せない。
+# テストでは、全部読んで Python の中でくらべる
+def task_titled(title):
+    """タイトルが title のタスクを1件返す（なければ DoesNotExist、2件以上なら MultipleObjectsReturned）。"""
+    found = [task for task in Task.objects.all() if task.title == title]
+    if not found:
+        raise Task.DoesNotExist(title)
+    if len(found) > 1:
+        raise Task.MultipleObjectsReturned(title)
+    return found[0]
+
+
+def has_task(title):
+    return any(task.title == title for task in Task.objects.all())
+
+
+def named(user, name):
+    """user の分類のうち、名前が name のもの（なければテストを失敗させる）。"""
+    category = category_named(user, name)
+    assert category is not None, f"分類「{name}」がありません"
+    return category
 
 
 class HomeViewTests(TestCase):
@@ -95,7 +121,7 @@ class TaskCreateViewTests(TestCase):
             self.url, {"title": "実習記録を書く", "importance": 2}, follow=True
         )
         self.assertRedirects(response, reverse("home"))
-        task = Task.objects.get(title="実習記録を書く")
+        task = task_titled("実習記録を書く")
         self.assertEqual(task.owner, self.me)
         self.assertIsNone(task.due_at)
         # ホームに戻ると、お知らせとカードが出る
@@ -109,7 +135,7 @@ class TaskCreateViewTests(TestCase):
             self.url,
             {"title": "なりすまし", "importance": 2, "owner": self.other.pk},
         )
-        self.assertEqual(Task.objects.get(title="なりすまし").owner, self.me)
+        self.assertEqual(task_titled("なりすまし").owner, self.me)
 
     def test_due_at_from_datetime_local_input(self):
         # スマホの日時入力（datetime-local）が送ってくる形で受け取れる
@@ -118,7 +144,7 @@ class TaskCreateViewTests(TestCase):
             self.url,
             {"title": "レポート", "importance": 3, "due_at": "2026-12-01T18:00"},
         )
-        due = timezone.localtime(Task.objects.get(title="レポート").due_at)
+        due = timezone.localtime(task_titled("レポート").due_at)
         self.assertEqual((due.month, due.day, due.hour, due.minute), (12, 1, 18, 0))
 
     def test_title_is_required(self):
@@ -236,7 +262,7 @@ class TaskDetailEditTests(TestCase):
             url, {"title": "薬理学", "parent": self.exam.pk, "importance": 2}, follow=True
         )
         self.assertRedirects(response, reverse("task_detail", args=[self.exam.pk]))
-        child = Task.objects.get(title="薬理学")
+        child = task_titled("薬理学")
         self.assertEqual(child.parent, self.exam)
         self.assertEqual(child.owner, self.me)
 
@@ -250,7 +276,7 @@ class TaskDetailEditTests(TestCase):
         url = reverse("task_create_child", args=[chapter.pk])
         response = self.client.post(url, {"title": "4段目", "importance": 2})
         self.assertRedirects(response, reverse("task_detail", args=[chapter.pk]))
-        self.assertFalse(Task.objects.filter(title="4段目").exists())
+        self.assertFalse(has_task("4段目"))
 
     def test_third_level_task_cannot_be_chosen_as_parent(self):
         # 3段目のタスクは親の選択肢に出ず、番号を直接送っても「正しくない選択」になる
@@ -337,7 +363,7 @@ class ParentSelectTests(TestCase):
             {"title": "問題集 第2章", "parent": self.subject.pk, "importance": 2},
         )
         self.assertRedirects(response, reverse("home"))
-        self.assertEqual(Task.objects.get(title="問題集 第2章").parent, self.subject)
+        self.assertEqual(task_titled("問題集 第2章").parent, self.subject)
 
     def test_cannot_choose_other_users_task(self):
         response = self.client.post(
@@ -345,7 +371,7 @@ class ParentSelectTests(TestCase):
             {"title": "なりすまし", "parent": self.others.pk, "importance": 2},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Task.objects.filter(title="なりすまし").exists())
+        self.assertFalse(has_task("なりすまし"))
 
     def test_edit_hides_self_descendants_and_too_deep(self):
         # 薬理学（下に1段ある）を編集するとき：自分と子孫は出ない。2段目の下に付けると4段になるので出ない
@@ -390,16 +416,16 @@ class CategoryTests(TestCase):
         self.assertEqual(labels, ["分類なし", "授業", "実習", "資格対策", "研究", "＋ 新しい分類…"])
 
     def test_create_task_with_existing_category(self):
-        practicum = self.me.categories.get(name="実習")
+        practicum = named(self.me, "実習")
         self.client.post(reverse("task_create"), {"title": "実習記録", "importance": 2, "category": practicum.pk})
-        self.assertEqual(Task.objects.get(title="実習記録").category, practicum)
+        self.assertEqual(task_titled("実習記録").category, practicum)
 
     def test_create_task_with_new_category(self):
         self.client.post(
             reverse("task_create"),
             {"title": "大会の準備", "importance": 2, "category": "__new__", "new_category_name": " 部活 "},
         )
-        task = Task.objects.get(title="大会の準備")
+        task = task_titled("大会の準備")
         self.assertEqual(task.category.name, "部活")  # 前後の空白は取る
         self.assertEqual(task.category.owner, self.me)
         # 次からは選択肢に並ぶ
@@ -411,8 +437,8 @@ class CategoryTests(TestCase):
             reverse("task_create"),
             {"title": "日誌", "importance": 2, "category": "__new__", "new_category_name": "実習"},
         )
-        self.assertEqual(self.me.categories.filter(name="実習").count(), 1)
-        self.assertEqual(Task.objects.get(title="日誌").category.name, "実習")
+        self.assertEqual(sum(c.name == "実習" for c in self.me.categories.all()), 1)
+        self.assertEqual(task_titled("日誌").category.name, "実習")
 
     def test_new_category_needs_a_name(self):
         response = self.client.post(
@@ -426,36 +452,36 @@ class CategoryTests(TestCase):
         self.client.post(
             reverse("task_create"), {"title": "", "importance": 2, "category": "__new__", "new_category_name": "部活"}
         )
-        self.assertFalse(self.me.categories.filter(name="部活").exists())
+        self.assertFalse((category_named(self.me, "部活") is not None))
 
     def test_cannot_use_other_users_category(self):
-        others = self.other.categories.get(name="授業")
+        others = named(self.other, "授業")
         response = self.client.post(reverse("task_create"), {"title": "なりすまし", "importance": 2, "category": others.pk})
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Task.objects.filter(title="なりすまし").exists())
+        self.assertFalse(has_task("なりすまし"))
 
     def test_card_shows_category_name(self):
-        Task.objects.create(owner=self.me, title="日誌", category=self.me.categories.get(name="実習"))
+        Task.objects.create(owner=self.me, title="日誌", category=named(self.me, "実習"))
         Task.objects.create(owner=self.me, title="分類なしのタスク")
         response = self.client.get(reverse("home"))
         self.assertContains(response, "実習")
         self.assertContains(response, "分類なし")
 
     def test_rename_category(self):
-        cls = self.me.categories.get(name="授業")
+        cls = named(self.me, "授業")
         self.client.post(reverse("category_update", args=[cls.pk]), {"name": "講義"})
         cls.refresh_from_db()
         self.assertEqual(cls.name, "講義")
 
     def test_rename_to_existing_name_is_rejected(self):
-        cls = self.me.categories.get(name="授業")
+        cls = named(self.me, "授業")
         response = self.client.post(reverse("category_update", args=[cls.pk]), {"name": "実習"}, follow=True)
         cls.refresh_from_db()
         self.assertEqual(cls.name, "授業")
         self.assertContains(response, "分類「実習」はもうあります")
 
     def test_delete_category_keeps_tasks(self):
-        research = self.me.categories.get(name="研究")
+        research = named(self.me, "研究")
         task = Task.objects.create(owner=self.me, title="文献調査", category=research)
         response = self.client.post(reverse("category_delete", args=[research.pk]), follow=True)
         self.assertContains(response, "1件のタスクは「分類なし」になりました")
@@ -464,16 +490,16 @@ class CategoryTests(TestCase):
 
     def test_create_category_on_manage_page(self):
         self.client.post(reverse("category_create"), {"name": "バイト"})
-        self.assertTrue(self.me.categories.filter(name="バイト").exists())
+        self.assertTrue((category_named(self.me, "バイト") is not None))
 
     def test_cannot_change_other_users_category(self):
-        others = self.other.categories.get(name="授業")
+        others = named(self.other, "授業")
         self.assertEqual(self.client.post(reverse("category_update", args=[others.pk]), {"name": "x"}).status_code, 404)
         self.assertEqual(self.client.post(reverse("category_delete", args=[others.pk])).status_code, 404)
-        self.assertTrue(self.other.categories.filter(name="授業").exists())
+        self.assertTrue((category_named(self.other, "授業") is not None))
 
     def test_manage_page_lists_my_categories_with_counts(self):
-        Task.objects.create(owner=self.me, title="日誌", category=self.me.categories.get(name="実習"))
+        Task.objects.create(owner=self.me, title="日誌", category=named(self.me, "実習"))
         response = self.client.get(reverse("category_list"))
         self.assertContains(response, 'value="実習"')
         self.assertContains(response, "タスク 1件")
@@ -591,7 +617,7 @@ class SourcePhotoTests(TestCase):
         source = self.task.sources.get()
         # ランダムな名前のJPEGとして、持ち主のフォルダに保存される
         self.assertRegex(source.photo.name, rf"^source_photos/{self.me.pk}/[0-9a-f]{{32}}\.jpg$")
-        with Image.open(source.photo.path) as saved:
+        with source.photo.open("rb") as file, Image.open(file) as saved:  # 暗号化してあるので、open() で元に戻して読む
             self.assertEqual(saved.format, "JPEG")
             self.assertEqual(max(saved.size), 2000)  # 長い辺は2000pxまで縮める
         self.assertContains(response, reverse("source_photo", args=[source.pk]))
@@ -601,7 +627,7 @@ class SourcePhotoTests(TestCase):
         exif[0x010F] = "TestCameraMaker"  # 機種の情報
         exif[0x0132] = "2026:11:20 10:00:00"  # 撮影日時
         self.post_photo(make_image(exif=exif))
-        with Image.open(self.task.sources.get().photo.path) as saved:
+        with self.task.sources.get().photo.open("rb") as file, Image.open(file) as saved:  # 暗号化してあるので、open() で元に戻して読む
             self.assertEqual(len(saved.getexif()), 0)
 
     def test_png_and_webp_are_accepted(self):
@@ -739,7 +765,7 @@ class PrerequisiteTests(TestCase):
             reverse("task_create"), {"title": "なりすまし", "prerequisite": others.pk, "importance": 2}
         )
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Task.objects.filter(title="なりすまし").exists())
+        self.assertFalse(has_task("なりすまし"))
 
     def test_locked_card_and_unlock_after_done(self):
         report = Task.objects.create(owner=self.me, title="レポートを書く", prerequisite=self.research)
@@ -1142,7 +1168,7 @@ class MindMapTests(TestCase):
 
     def test_add_a_top_task_to_the_room(self):
         response = self.add(title="  学会発表  ", anchor="")
-        task = Task.objects.get(title="学会発表")
+        task = task_titled("学会発表")
         self.assertEqual((task.parent, task.category, task.on_map), (None, self.research, True))
         self.assertRedirects(response, self.room_url() + f"?focus={task.pk}")
         self.assertContains(response, "「学会発表」を置きました．")
@@ -1150,23 +1176,23 @@ class MindMapTests(TestCase):
 
     def test_add_a_top_task_to_no_category_room(self):
         self.add(title="メモ", anchor="", room="none")
-        task = Task.objects.get(title="メモ")
+        task = task_titled("メモ")
         self.assertEqual((task.category, task.on_map), (None, True))
 
     def test_add_inside_a_task(self):
         response = self.add(title="構成を考える", anchor=self.study.pk, relation="child")
-        task = Task.objects.get(title="構成を考える")
+        task = task_titled("構成を考える")
         self.assertEqual((task.parent, task.category), (self.study, self.research))
         self.assertContains(response, "「構成を考える」を「卒業研究」のサブタスクとして足しました．")
 
     def test_add_after_a_child_is_placed_next_to_it(self):
         self.add(title="考察を書く", anchor=self.reading.pk, relation="after")
-        task = Task.objects.get(title="考察を書く")
+        task = task_titled("考察を書く")
         self.assertEqual((task.parent, task.prerequisite), (self.study, self.reading))
 
     def test_add_after_a_top_task_makes_another_top_task_in_the_room(self):
         response = self.add(title="論文を書く", anchor=self.study.pk, relation="after")
-        task = Task.objects.get(title="論文を書く")
+        task = task_titled("論文を書く")
         self.assertEqual((task.parent, task.prerequisite, task.category, task.on_map), (None, self.study, self.research, True))
         self.assertIn("論文を書く", self.nodes())
         self.assertContains(response, "「論文を書く」を，「卒業研究」が終わってからやるタスクとして足しました．")
@@ -1175,7 +1201,7 @@ class MindMapTests(TestCase):
         chapter = Task.objects.create(owner=self.me, title="第1章", parent=self.reading)  # 3段目
         response = self.add(title="4段目", anchor=chapter.pk, relation="child")
         self.assertContains(response, "3段まで")
-        self.assertFalse(Task.objects.filter(title="4段目").exists())
+        self.assertFalse(has_task("4段目"))
 
     def test_add_rejects_bad_input(self):
         self.assertContains(self.add(title="   ", anchor=""), "タスクの名前を入れてください．")
@@ -1407,7 +1433,7 @@ class CategoryFollowsTopTests(TestCase):
             {"title": "問1", "parent": self.study.pk, "category": "__new__", "new_category_name": "", "importance": 2},
         )
         self.assertEqual(response.status_code, 302)  # 新しい分類の名前がなくても、親があれば止めない
-        task = Task.objects.get(title="問1")
+        task = task_titled("問1")
         self.assertEqual(task.category, self.research)
         self.assertEqual(self.me.categories.count(), 4)  # 分類は増えない
 
@@ -1540,7 +1566,7 @@ class BackNavigationTests(TestCase):
 
     def setUp(self):
         self.me = get_user_model().objects.create_user("student", password="test-pass-123")
-        self.research = self.me.categories.get(name="研究")
+        self.research = named(self.me, "研究")
         self.study = Task.objects.create(owner=self.me, title="卒業研究", category=self.research, on_map=True)
         self.reading = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
         self.client.force_login(self.me)
@@ -1881,3 +1907,115 @@ class FeedbackTests(TestCase):
         self.assertNotContains(response, 'name="body"')
         self.assertContains(response, 'name="is_resolved"')
         self.assertEqual(self.client.get(reverse("admin:tasks_feedback_add")).status_code, 403)
+
+
+ENCRYPTION_MEDIA = tempfile.mkdtemp()
+
+
+@override_settings(MEDIA_ROOT=ENCRYPTION_MEDIA)
+class EncryptionTests(TestCase):
+    """タスクの中身を暗号化して保存する・管理画面には件数だけ（Issue #49）。"""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(ENCRYPTION_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        self.me = get_user_model().objects.create_user("student", password="test-pass-123")
+        self.research = named(self.me, "研究")
+        self.study = Task.objects.create(owner=self.me, title="卒業研究", memo="山田先生に相談", category=self.research, on_map=True)
+        self.reading = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        self.source = Source.objects.create(task=self.study, kind="classroom", url="https://example.com/kadai", memo="考察を厚く")
+        self.client.force_login(self.me)
+
+    def raw(self, sql):
+        """データベースに入っている文字を、そのまま（元に戻さずに）読む。ファイルを直接開いたときと同じ見え方。"""
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            return [value for row in cursor.fetchall() for value in row]
+
+    def test_database_holds_no_readable_text(self):
+        stored = (
+            self.raw("SELECT title, memo FROM tasks_task")
+            + self.raw("SELECT url, memo FROM tasks_source")
+            + self.raw("SELECT name FROM tasks_category")
+        )
+        for plain in ("卒業研究", "山田先生に相談", "文献調査", "example.com", "考察を厚く", "研究"):
+            self.assertFalse(any(plain in value for value in stored if value), plain)
+        self.assertTrue(all(is_encrypted_text(value) for value in stored if value))
+        # 空のメモは空のまま（中身はないので、隠すものもない）
+        self.assertIn("", self.raw("SELECT memo FROM tasks_task"))
+
+    def test_app_reads_the_original_text(self):
+        task = Task.objects.get(pk=self.study.pk)
+        self.assertEqual((task.title, task.memo, task.category.name), ("卒業研究", "山田先生に相談", "研究"))
+        self.assertEqual(Source.objects.get().url, "https://example.com/kadai")
+        self.assertContains(self.client.get(reverse("task_detail", args=[self.study.pk])), "山田先生に相談")
+
+    def test_same_text_is_stored_differently_each_time(self):
+        a = Task.objects.create(owner=self.me, title="同じ")
+        b = Task.objects.create(owner=self.me, title="同じ")
+        first, second = self.raw(f"SELECT title FROM tasks_task WHERE id IN ({a.pk}, {b.pk})")
+        self.assertNotEqual(first, second)  # 同じ文字でも、保存された形はちがう（同じかどうかも分からない）
+
+    def test_searching_inside_encrypted_text_is_refused(self):
+        # 暗号化した欄で探すと、黙って0件にならず、すぐエラーになる
+        with self.assertRaises(FieldError):
+            Task.objects.filter(title="卒業研究").count()
+        with self.assertRaises(FieldError):
+            self.me.categories.filter(name__contains="研").count()
+        self.assertEqual(Task.objects.filter(memo__isnull=False).count(), 2)
+
+    def test_old_key_still_reads_after_adding_a_new_key(self):
+        from django.conf import settings
+        from cryptography.fernet import Fernet
+
+        new_key = Fernet.generate_key().decode()
+        with override_settings(FIELD_ENCRYPTION_KEYS=[new_key, *settings.FIELD_ENCRYPTION_KEYS]):
+            self.assertEqual(Task.objects.get(pk=self.study.pk).title, "卒業研究")
+
+    def test_photo_file_is_encrypted_on_disk(self):
+        url = reverse("source_create", args=[self.study.pk])
+        self.client.post(url, {"kind": "paper", "url": "", "memo": "", "photo": make_image()})
+        source = self.study.sources.exclude(photo="").get()
+        with open(source.photo.path, "rb") as file:
+            stored = file.read()
+        self.assertFalse(stored.startswith(b"\xff\xd8"))  # JPEG のはじまりの印がない＝そのままでは開けない
+        self.assertTrue(decrypt_bytes(stored).startswith(b"\xff\xd8"))  # 鍵で元に戻すと JPEG
+        # 持ち主が見る画面では、元の写真に戻して返す
+        response = self.client.get(reverse("source_photo", args=[source.pk]))
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"\xff\xd8"))
+
+    def test_category_names_stay_unique_without_the_database_rule(self):
+        self.client.post(reverse("category_create"), {"name": "研究"})
+        self.assertEqual(sum(c.name == "研究" for c in self.me.categories.all()), 1)
+        lesson = named(self.me, "授業")
+        response = self.client.post(reverse("category_update", args=[lesson.pk]), {"name": "研究"}, follow=True)
+        self.assertContains(response, "分類「研究」はもうあります．")
+        lesson.refresh_from_db()
+        self.assertEqual(lesson.name, "授業")
+
+    def test_admin_shows_counts_but_no_contents(self):
+        admin_user = get_user_model().objects.create_superuser("kanri", password="test-pass-123")
+        self.client.force_login(admin_user)
+        # タスク・分類・資料の画面はない
+        for name in ("task", "category", "source"):
+            with self.subTest(model=name):
+                with self.assertRaises(NoReverseMatch):
+                    reverse(f"admin:tasks_{name}_changelist")
+        response = self.client.get(reverse("admin:tasks_usage_changelist"))
+        self.assertEqual(response.status_code, 200)
+        for plain in ("卒業研究", "山田先生に相談", "文献調査", "考察を厚く"):
+            self.assertNotContains(response, plain)
+        student = next(row for row in response.context["cl"].result_list if row.username == "student")
+        self.assertEqual((student.task_total, student.subtask_total, student.on_map_total, student.source_total), (2, 1, 1, 1))
+        self.assertIn(("📁 サブタスク", 1), response.context["usage_summary"])
+        # 見るだけ：1人ずつの画面・足す・消すはない
+        self.assertEqual(self.client.get(reverse("admin:tasks_usage_change", args=[self.me.pk])).status_code, 403)
+        self.assertEqual(self.client.get(reverse("admin:tasks_usage_add")).status_code, 403)
+
+    def test_help_explains_privacy(self):
+        response = self.client.get(reverse("help"))
+        self.assertContains(response, "🛡️ プライバシー")
+        self.assertContains(response, "管理画面に出るのは件数だけ")

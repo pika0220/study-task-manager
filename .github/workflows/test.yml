@@ -32,6 +32,7 @@ jobs:
           DJANGO_ALLOWED_HOSTS: example.com
         run: |
           export DJANGO_SECRET_KEY="$(uv run python -c 'import secrets; print(secrets.token_urlsafe(50))')"
+          export DJANGO_FIELD_KEY="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
           uv run python manage.py check --deploy --fail-level WARNING
 
       - name: マイグレーションの作り忘れがないか確かめる

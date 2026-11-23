@@ -40,6 +40,13 @@ def env_list(name):
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 
+# ---- タスクの中身を暗号化する鍵（Issue #49）----
+# 環境変数 DJANGO_FIELD_KEY に入れる。作り方：uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# 鍵を取りかえるときは「新しい鍵,古い鍵」とカンマで並べる（新しい鍵で暗号化し、どちらの鍵でも元に戻せる）。
+# ⚠ 鍵をなくすと、暗号化したデータは誰にも元に戻せない。GitHub には置かず、別の安全な場所にも控えておく
+DEV_FIELD_KEY = "vbQPSCJAUdvsP8NEDv4KrKvGYspVEg1aWI1heWlLSV0="  # 開発用（公開している鍵なので、本番では使えない）
+FIELD_ENCRYPTION_KEYS = env_list("DJANGO_FIELD_KEY") or [DEV_FIELD_KEY]
+
 # ---- 本番だけの安全の設定（Issue #45）----
 # 開発（http://127.0.0.1）では https が使えないので、本番（DEBUG=False）のときだけ有効にする。
 # 確かめ方：本番と同じ環境変数で `python manage.py check --deploy`（CI でも毎回確かめる）
@@ -50,6 +57,9 @@ if not DEBUG:
     # どのアドレスで開くかが決まっていないと、全部の画面が「400 Bad Request」になる
     if not ALLOWED_HOSTS:
         raise ImproperlyConfigured("本番では DJANGO_ALLOWED_HOSTS に、公開するアドレス（例：example.com）を入れてください。")
+    # 暗号化の鍵：本番では、自分で作った鍵が必要（開発用の鍵は GitHub で誰でも見られる）
+    if not env_list("DJANGO_FIELD_KEY") or DEV_FIELD_KEY in FIELD_ENCRYPTION_KEYS:
+        raise ImproperlyConfigured("本番では DJANGO_FIELD_KEY に、自分で作った暗号化の鍵を入れてください。")
     SECURE_SSL_REDIRECT = True  # http:// で来たら https:// に移す
     SESSION_COOKIE_SECURE = True  # ログインの印（Cookie）を https のときだけ送る
     CSRF_COOKIE_SECURE = True  # フォームの合言葉の Cookie も https のときだけ

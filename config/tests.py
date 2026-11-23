@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from django.test import RequestFactory, SimpleTestCase
 from django.views.defaults import server_error
 
@@ -17,6 +18,7 @@ PRODUCTION = {
     "DJANGO_DEBUG": "0",
     "DJANGO_ALLOWED_HOSTS": "example.com",
     "DJANGO_SECRET_KEY": secrets.token_urlsafe(50),
+    "DJANGO_FIELD_KEY": Fernet.generate_key().decode(),  # 暗号化の鍵（Issue #49）
 }
 
 
@@ -46,12 +48,20 @@ class ProductionSettingsTests(SimpleTestCase):
         self.assertEqual(output.strip().splitlines()[-1], "False False False 0")
 
     def test_production_refuses_the_dev_key_or_no_hosts(self):
-        for missing in ("DJANGO_SECRET_KEY", "DJANGO_ALLOWED_HOSTS"):
+        for missing in ("DJANGO_SECRET_KEY", "DJANGO_ALLOWED_HOSTS", "DJANGO_FIELD_KEY"):
             with self.subTest(missing=missing):
                 env = {k: v for k, v in PRODUCTION.items() if k != missing}
                 code, output = run_django(env, "check")
                 self.assertNotEqual(code, 0)
                 self.assertIn(missing, output)
+
+    def test_production_refuses_the_dev_field_key(self):
+        from config.settings import DEV_FIELD_KEY
+
+        env = {**PRODUCTION, "DJANGO_FIELD_KEY": f"{PRODUCTION['DJANGO_FIELD_KEY']},{DEV_FIELD_KEY}"}
+        code, output = run_django(env, "check")
+        self.assertNotEqual(code, 0)
+        self.assertIn("DJANGO_FIELD_KEY", output)
 
     def test_admin_url_must_end_with_a_slash(self):
         code, output = run_django({"DJANGO_ADMIN_URL": "kanri"}, "check")
