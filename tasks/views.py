@@ -1,5 +1,6 @@
 import math
 from collections import defaultdict
+from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -10,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, UpdateView
@@ -780,3 +782,70 @@ def task_map_arrange(request, pk):
     request.user.tasks.filter(Q(pk=root.pk) | Q(parent=root) | Q(parent__parent=root)).update(map_x=None, map_y=None)
     messages.success(request, "点を自動で並べ直しました．")
     return redirect("task_map_root", pk=root.pk)
+
+
+# ---- 進み具合（F-06）----
+
+@login_required
+def progress(request):
+    """進み具合の画面。全体・分類ごと・メインタスクごとに「何件中何件終わったか」を見せる。
+
+    数えるのは「中の作業がないタスク」（子タスクのないタスク）だけ。
+    「卒業研究」のようなまとめ役のタスクは、中の作業を数えれば足りるので、二重に数えない。
+    値は保存せず、開くたびに計算する（設計で決めたこと）。
+    """
+    now = timezone.now()
+    week_ago = now - timedelta(days=7)
+    # 自分のタスクを1回の問い合わせでまとめて読み、あとは Python の中で数える
+    tasks = list(request.user.tasks.select_related("category", "prerequisite"))
+    by_id = {t.pk: t for t in tasks}
+    has_children = {t.parent_id for t in tasks if t.parent_id}
+    leaves = [t for t in tasks if t.pk not in has_children]
+
+    def summary(items):
+        total = len(items)
+        done = sum(1 for t in items if t.is_done)
+        return {
+            "total": total,
+            "done": done,
+            "percent": round(done * 100 / total) if total else 0,
+            # まだ終わっていないものを、ホームと同じ順（重要度 → 締切）で
+            "open": [t for t in items if not t.is_done],
+            "overdue": sum(1 for t in items if not t.is_done and t.due_at and t.due_at < now),
+        }
+
+    overall = summary(leaves)
+    overall["week_done"] = sum(1 for t in leaves if t.is_done and t.done_at and t.done_at >= week_ago)
+
+    # 分類ごと：分類を作った順に並べ、「分類なし」は最後
+    by_category = defaultdict(list)
+    for t in leaves:
+        by_category[t.category_id].append(t)
+    categories = []
+    for category in request.user.categories.all():
+        if by_category.get(category.pk):
+            categories.append({"name": category.name, **summary(by_category[category.pk])})
+    if by_category.get(None):
+        categories.append({"name": "分類なし", **summary(by_category[None])})
+
+    # メインタスクごと：中の作業があって、まだ終わっていないメインタスク
+    def root_of(task):
+        while task.parent_id is not None:
+            task = by_id[task.parent_id]
+        return task
+
+    by_root = defaultdict(list)
+    for t in leaves:
+        if t.parent_id is not None:
+            by_root[root_of(t).pk].append(t)
+    main_tasks = [
+        {"task": t, **summary(by_root[t.pk])}
+        for t in tasks
+        if t.parent_id is None and not t.is_done and by_root.get(t.pk)
+    ]
+
+    return render(
+        request,
+        "tasks/progress.html",
+        {"overall": overall, "categories": categories, "main_tasks": main_tasks},
+    )

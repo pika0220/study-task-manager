@@ -1338,6 +1338,97 @@ class MindMapTests(TestCase):
         self.assertEqual(summary.parent, self.reading)
 
 
+class ProgressTests(TestCase):
+    """進み具合（F-06）。数えるのは中の作業がないタスクだけ。全体・分類ごと・メインタスクごと。"""
+
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        cats = {c.name: c for c in self.me.categories.all()}
+        self.research, self.practice = cats["研究"], cats["実習"]
+        # 卒業研究（まとめ役）の中に、文献調査（済）と構成（未）→ 卒業研究そのものは数えない
+        self.study = Task.objects.create(owner=self.me, title="卒業研究", category=self.research)
+        Task.objects.create(owner=self.me, title="文献調査", parent=self.study, category=self.research, is_done=True)
+        self.outline = Task.objects.create(owner=self.me, title="構成を考える", parent=self.study, category=self.research)
+        # 中の作業がないタスク
+        Task.objects.create(owner=self.me, title="実習記録", category=self.practice, is_done=True)
+        self.late = Task.objects.create(
+            owner=self.me, title="期限切れの課題", due_at=timezone.now() - timedelta(days=1)
+        )
+        Task.objects.create(owner=self.other, title="他の人のタスク", category=self.other.categories.first())
+        self.client.force_login(self.me)
+
+    def get(self):
+        return self.client.get(reverse("progress"))
+
+    def test_anonymous_user_is_sent_to_login(self):
+        self.client.logout()
+        self.assertRedirects(self.client.get(reverse("progress")), reverse("login") + "?next=/progress/")
+
+    def test_overall_counts_only_tasks_without_children(self):
+        overall = self.get().context["overall"]
+        # 文献調査・構成・実習記録・期限切れの課題 の4件（卒業研究と、他の人のタスクは数えない）
+        self.assertEqual((overall["done"], overall["total"], overall["percent"]), (2, 4, 50))
+        self.assertEqual(overall["overdue"], 1)
+
+    def test_week_done_counts_last_seven_days(self):
+        old = Task.objects.create(owner=self.me, title="前に終えた", is_done=True)
+        Task.objects.filter(pk=old.pk).update(done_at=timezone.now() - timedelta(days=8))
+        self.assertEqual(self.get().context["overall"]["week_done"], 2)  # 8日前のものは数えない
+
+    def test_categories_in_created_order_with_no_category_last(self):
+        categories = self.get().context["categories"]
+        self.assertEqual([c["name"] for c in categories], ["実習", "研究", "分類なし"])
+        research = categories[1]
+        self.assertEqual((research["done"], research["total"]), (1, 2))
+        self.assertEqual([t.title for t in research["open"]], ["構成を考える"])
+        self.assertEqual(categories[2]["overdue"], 1)
+
+    def test_main_tasks_show_only_open_ones_with_children(self):
+        main_tasks = self.get().context["main_tasks"]
+        self.assertEqual([m["task"].title for m in main_tasks], ["卒業研究"])  # 中の作業がないタスクは出さない
+        self.assertEqual((main_tasks[0]["done"], main_tasks[0]["total"]), (1, 2))
+        self.study.is_done = True
+        self.study.save()
+        self.assertEqual(self.get().context["main_tasks"], [])  # 終わったメインタスクは出さない
+
+    def test_grandchildren_count_toward_their_main_task(self):
+        Task.objects.create(owner=self.me, title="第1章", parent=self.outline)
+        main = self.get().context["main_tasks"][0]
+        # 構成を考える は中の作業ができたので数えず、第1章を数える
+        self.assertEqual((main["done"], main["total"]), (1, 2))
+
+    def test_page_shows_bars_and_links(self):
+        response = self.get()
+        self.assertContains(response, "1件＝中の作業がないタスク")
+        self.assertContains(response, reverse("task_detail", args=[self.outline.pk]))
+        self.assertContains(response, reverse("task_map_root", args=[self.study.pk]))
+        self.assertContains(response, "<progress", count=1 + 3 + 1)  # 全体・分類3つ・メインタスク1つ
+        self.assertNotContains(response, "他の人のタスク")
+
+    def test_empty_state(self):
+        self.me.tasks.all().delete()
+        self.assertContains(self.get(), "まだタスクがありません")
+
+    def test_dock_links_to_progress(self):
+        response = self.get()
+        self.assertContains(response, f'href="{reverse("progress")}" class="dock-active"')
+        self.assertNotContains(self.client.get(reverse("home")), "準備中")
+
+    def test_query_count_does_not_grow_with_tasks(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as few:
+            self.get()
+        for i in range(5):
+            Task.objects.create(owner=self.me, title=f"追加{i}", parent=self.study, prerequisite=self.outline)
+        with CaptureQueriesContext(connection) as many:
+            self.get()
+        self.assertEqual(len(few), len(many))
+
+
 class TaskModelTests(TestCase):
     def setUp(self):
         User = get_user_model()

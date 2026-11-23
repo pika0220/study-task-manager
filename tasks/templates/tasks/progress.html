@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}進み具合{% endblock %}
+
+{% block content %}
+  <div class="mb-4 flex items-end justify-between gap-2">
+    <h1 class="text-xl font-bold">進み具合</h1>
+    <!-- 何を数えているかを、記号で短く示す（📁 の中の作業がないタスクを1件と数える） -->
+    <span class="text-xs text-base-content/60">1件＝中の作業がないタスク</span>
+  </div>
+
+  {% if overall.total %}
+    <!-- 全体 -->
+    <section class="card mb-6 bg-base-100 shadow-sm" aria-label="全体">
+      <div class="card-body gap-3 p-4">
+        <div class="flex items-end justify-between">
+          <span class="text-3xl font-bold text-primary">{{ overall.percent }}<span class="text-base">%</span></span>
+          <span class="text-sm text-base-content/70"><span class="font-bold text-base-content">{{ overall.done }}</span> / {{ overall.total }}</span>
+        </div>
+        <progress class="progress {% if overall.percent == 100 %}progress-success{% else %}progress-primary{% endif %} w-full" value="{{ overall.done }}" max="{{ overall.total }}" aria-label="全体の進み具合"></progress>
+        <!-- 数字は記号とセットで見せる（✔ 終わった・⏳ 残り・⚠ 期限切れ） -->
+        <div class="grid grid-cols-3 gap-2 text-center text-sm">
+          <div class="rounded-box bg-base-200 p-2" title="この7日間に終わったタスク">
+            <div class="text-lg font-bold">✔ {{ overall.week_done }}</div>
+            <div class="text-xs text-base-content/60">この7日</div>
+          </div>
+          <div class="rounded-box bg-base-200 p-2" title="まだ終わっていないタスク">
+            <div class="text-lg font-bold">⏳ {{ overall.open|length }}</div>
+            <div class="text-xs text-base-content/60">残り</div>
+          </div>
+          <div class="rounded-box p-2 {% if overall.overdue %}bg-error/15 text-error{% else %}bg-base-200{% endif %}" title="締切を過ぎたタスク">
+            <div class="text-lg font-bold">⚠ {{ overall.overdue }}</div>
+            <div class="text-xs {% if not overall.overdue %}text-base-content/60{% endif %}">期限切れ</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 分類ごと（F-06）。押すと、まだ終わっていないタスクが開く -->
+    <h2 class="mb-2 font-bold">分類</h2>
+    <div class="mb-6 flex flex-col gap-2">
+      {% for item in categories %}
+        <details class="collapse collapse-arrow bg-base-100 shadow-sm">
+          <summary class="collapse-title min-h-14 pe-10">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate font-bold">{{ item.name }}</span>
+              <span class="shrink-0 text-sm">
+                {% if item.overdue %}<span class="badge badge-error badge-sm me-1">⚠ {{ item.overdue }}</span>{% endif %}
+                <span class="font-bold">{{ item.done }}</span><span class="text-base-content/60"> / {{ item.total }}</span>
+              </span>
+            </div>
+            <progress class="progress {% if item.percent == 100 %}progress-success{% else %}progress-primary{% endif %} mt-2 w-full" value="{{ item.done }}" max="{{ item.total }}" aria-label="{{ item.name }}の進み具合"></progress>
+          </summary>
+          <div class="collapse-content">
+            {% if item.open %}
+              <ul class="flex flex-col">
+                {% for task in item.open %}
+                  <li>
+                    <a href="{% url 'task_detail' task.pk %}" class="flex min-h-11 items-center justify-between gap-2 border-b border-base-200 py-2 hover:underline">
+                      <span class="min-w-0 truncate">{% if task.is_locked %}🔒 {% endif %}{{ task.title }}</span>
+                      {% if task.due_at %}
+                        <span class="shrink-0 text-xs {% if task.due_status == 'overdue' %}font-bold text-error{% else %}text-base-content/60{% endif %}">{% if task.due_status == 'overdue' %}⚠ {% endif %}{{ task.due_at|date:"n/j" }}</span>
+                      {% endif %}
+                    </a>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="py-2 text-sm text-success">✔ ぜんぶ終わりました</p>
+            {% endif %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+
+    <!-- メインタスクごと：中の作業があるメインタスク。🗺 でそのマップへ -->
+    {% if main_tasks %}
+      <h2 class="mb-2 font-bold">メインタスク</h2>
+      <div class="flex flex-col gap-2">
+        {% for item in main_tasks %}
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body gap-2 p-4">
+              <div class="flex items-center justify-between gap-2">
+                <a href="{% url 'task_detail' item.task.pk %}" class="min-w-0 truncate font-bold hover:underline">{{ item.task.title }}</a>
+                <span class="flex shrink-0 items-center text-sm">
+                  {% if item.overdue %}<span class="badge badge-error badge-sm me-1">⚠ {{ item.overdue }}</span>{% endif %}
+                  <span class="font-bold">{{ item.done }}</span><span class="text-base-content/60">&nbsp;/ {{ item.total }}</span>
+                  <!-- 🗺️：このメインタスクのマップを開く -->
+                  <a href="{% url 'task_map_root' item.task.pk %}" class="btn btn-ghost btn-square ms-1 min-h-11 min-w-11 text-xl" aria-label="「{{ item.task.title }}」のマップを開く">🗺️</a>
+                </span>
+              </div>
+              <progress class="progress {% if item.percent == 100 %}progress-success{% else %}progress-primary{% endif %} w-full" value="{{ item.done }}" max="{{ item.total }}" aria-label="{{ item.task.title }}の進み具合"></progress>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% else %}
+    <!-- まだタスクがないとき -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body items-center text-center">
+        <p class="font-bold">まだタスクがありません</p>
+        <a href="{% url 'task_create' %}" class="btn btn-primary btn-sm mt-2">＋ タスクを追加する</a>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
