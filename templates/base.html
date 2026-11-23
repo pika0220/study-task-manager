@@ -29,7 +29,8 @@
             <button type="submit" class="btn btn-ghost btn-sm shrink-0">ログアウト</button>
           </form>
           <!-- ヘルプ（Issue #47）：使い方・記号の一覧 -->
-          <a href="{% url 'help' %}" class="btn btn-ghost btn-sm btn-circle shrink-0 text-lg" aria-label="ヘルプ">？</a>
+          <!-- from：どの画面で押したか（意見を送るときに、どこの話かが分かるように） -->
+          <a href="{% url 'help' %}?from={{ request.path|urlencode:'' }}" class="btn btn-ghost btn-sm btn-circle shrink-0 text-lg" aria-label="ヘルプ">？</a>
         {% endif %}
       </div>
     </div>

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% comment %}
+  ✉️ 意見を送る（Issue #48）。ヘルプから開く。送った意見は、管理画面の「意見」で読む。
+  from：どの画面で ？ を押したか。見えない欄で運び、意見と一緒に保存する
+{% endcomment %}
+
+{% block title %}意見を送る{% endblock %}
+
+{% block content %}
+  <div class="mb-3 text-sm">
+    <a href="{% url 'help' %}{% if from_page %}?from={{ from_page|urlencode:'' }}{% endif %}" class="link">← ？ ヘルプ</a>
+  </div>
+  <h1 class="mb-1 text-xl font-bold">✉️ 意見を送る</h1>
+  <p class="mb-4 text-xs text-base-content/60">管理者が読みます（ユーザー名も一緒に届く）．⚠ 個人情報は書かない</p>
+
+  {% if limit_reached %}
+    <div role="alert" class="alert alert-info text-sm">今日はここまで（1日 {{ limit }} 件まで）．また明日送ってください．</div>
+  {% else %}
+    <form method="post" class="card bg-base-100 shadow-sm">
+      <div class="card-body gap-3 p-4">
+        {% csrf_token %}
+        {% if from_page %}<input type="hidden" name="from" value="{{ from_page }}">{% endif %}
+
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">{{ form.kind.label }}</legend>
+          <!-- 3つの種類：ラジオボタンを、押しやすい大きなボタンの形にする -->
+          <div class="grid gap-2">
+            {% for choice in form.kind %}
+              <label class="feedback-kind btn min-h-12 justify-start">
+                {{ choice.tag }}
+                <span>{{ choice.choice_label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          {% for error in form.kind.errors %}<p class="text-sm text-error">{{ error }}</p>{% endfor %}
+        </fieldset>
+
+        {% include "partials/form_field.html" with field=form.body %}
+        {% if from_page %}<p class="text-xs text-base-content/60">画面：{{ from_page }}</p>{% endif %}
+
+        <button type="submit" class="btn btn-primary btn-block min-h-12">送る</button>
+      </div>
+    </form>
+  {% endif %}
+
+  <style>
+    /* ラジオの丸は隠し、ボタン全体を押せるようにする。選んだものは色を変える（:has＝中に〇〇を持つ） */
+    .feedback-kind { position: relative; }
+    .feedback-kind input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+    /* daisyUI のボタンは --btn-bg（背景）・--btn-fg（文字）・--btn-border（ふち）で色が決まるので、それを変える */
+    .feedback-kind:has(input:checked) { --btn-bg: var(--color-primary); --btn-fg: var(--color-primary-content); --btn-border: var(--color-primary); }
+    .feedback-kind:has(input:focus-visible) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+  </style>
+{% endblock %}

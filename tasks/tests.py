@@ -15,7 +15,7 @@ from django.utils import timezone
 from PIL import Image
 from pathlib import Path
 
-from .models import Source, Task
+from .models import Feedback, Source, Task
 from .views import GUIDE_CHAPTERS
 
 
@@ -1771,7 +1771,7 @@ class GuideTests(TestCase):
                 url = reverse(name)
                 self.assertRedirects(self.client.get(url), f"{reverse('login')}?next={url}")
         # ログインしていない画面には ？ を出さない
-        self.assertNotContains(self.client.get(reverse("login")), f'href="{reverse("help")}"')
+        self.assertNotContains(self.client.get(reverse("login")), f'href="{reverse("help")}')
 
     def test_guide_has_cards_for_every_chapter(self):
         self.client.force_login(self.user)
@@ -1795,9 +1795,89 @@ class GuideTests(TestCase):
     def test_help_links_to_each_chapter_and_lists_symbols(self):
         self.client.force_login(self.user)
         # 上のバーの ？ からヘルプへ
-        self.assertContains(self.client.get(reverse("home")), f'href="{reverse("help")}"')
+        self.assertContains(self.client.get(reverse("home")), f'href="{reverse("help")}?from=')
         response = self.client.get(reverse("help"))
         self.assertContains(response, f'href="{reverse("guide")}"')
         self.assertContains(response, f'href="{reverse("guide")}#map"')
         for symbol in ("📁", "🔒", "🔗", "📦", "⚠"):
             self.assertContains(response, symbol)
+
+
+class FeedbackTests(TestCase):
+    """ヘルプの「✉️ 意見を送る」（Issue #48）。"""
+
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.client.force_login(self.me)
+        self.url = reverse("feedback_create")
+
+    def send(self, **extra):
+        data = {"kind": "bug", "body": "線を引くと点がずれる", **extra}
+        return self.client.post(self.url, data, follow=True)
+
+    def test_needs_login(self):
+        self.client.logout()
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}")
+
+    def test_help_links_to_feedback_with_the_page(self):
+        # ？ は押した画面を from で運ぶ → ヘルプ → 意見を送る にも運ぶ
+        home = self.client.get(reverse("home"))
+        self.assertContains(home, reverse("help") + "?from=%2F")
+        response = self.client.get(reverse("help"), {"from": "/map/room/3/"})
+        self.assertContains(response, self.url + "?from=%2Fmap%2Froom%2F3%2F")
+
+    def test_send_feedback(self):
+        response = self.send(**{"from": "/map/room/3/?focus=5"})
+        self.assertRedirects(response, reverse("help"))
+        self.assertContains(response, "✉️ 送りました．ありがとうございます！")
+        feedback = Feedback.objects.get()
+        self.assertEqual(feedback.user, self.me)
+        self.assertEqual(feedback.kind, Feedback.Kind.BUG)
+        self.assertEqual(feedback.body, "線を引くと点がずれる")
+        self.assertEqual(feedback.page, "/map/room/3/")  # ? から後ろは残さない
+        self.assertFalse(feedback.is_resolved)
+
+    def test_page_outside_the_site_is_not_kept(self):
+        for value in ("https://example.com/x", "//example.com/x", "map"):
+            with self.subTest(value=value):
+                self.send(**{"from": value})
+                self.assertEqual(Feedback.objects.latest("pk").page, "")
+
+    def test_kind_and_body_are_required(self):
+        response = self.client.post(self.url, {"kind": "", "body": ""})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["form"].errors.keys(), {"kind", "body"})
+        response = self.client.post(self.url, {"kind": "good", "body": "あ" * 1001})
+        self.assertIn("body", response.context["form"].errors)
+        self.assertFalse(Feedback.objects.exists())
+
+    def test_daily_limit(self):
+        # 今日の分は上限より1件少なく、前の日の分は数えない
+        for _ in range(Feedback.DAILY_LIMIT - 1):
+            Feedback.objects.create(user=self.me, kind="idea", body="もっと")
+        old = Feedback.objects.create(user=self.me, kind="idea", body="前の日")
+        Feedback.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=2))
+        self.send()  # これで今日の上限ちょうど
+        self.assertEqual(Feedback.objects.filter(body="線を引くと点がずれる").count(), 1)
+        response = self.send(body="もう1件")
+        self.assertContains(response, "今日はここまで")
+        self.assertFalse(Feedback.objects.filter(body="もう1件").exists())
+
+    def test_feedback_stays_when_the_user_is_deleted(self):
+        self.send()
+        self.me.delete()
+        self.assertIsNone(Feedback.objects.get().user)
+
+    def test_admin_lists_feedback_and_only_resolved_can_change(self):
+        self.send()
+        admin_user = get_user_model().objects.create_superuser("kanri", password="test-pass-123")
+        self.client.force_login(admin_user)
+        changelist = reverse("admin:tasks_feedback_changelist")
+        self.assertContains(self.client.get(changelist), "線を引くと点がずれる")
+        feedback = Feedback.objects.get()
+        # 届いた内容は書きかえられない（読むだけ）
+        response = self.client.get(reverse("admin:tasks_feedback_change", args=[feedback.pk]))
+        self.assertNotContains(response, 'name="body"')
+        self.assertContains(response, 'name="is_resolved"')
+        self.assertEqual(self.client.get(reverse("admin:tasks_feedback_add")).status_code, 403)

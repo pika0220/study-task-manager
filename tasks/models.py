@@ -320,3 +320,42 @@ class Source(models.Model):
         # 中身のない記録が増えないよう、リンク・メモ・写真のどれか1つは必ず入れてもらう
         if not self.url and not self.memo.strip() and not self.photo:
             raise ValidationError("リンク・メモ・写真のどれか1つ以上を入れてください．")
+
+
+class Feedback(models.Model):
+    """ヘルプの「✉️ 意見を送る」（Issue #48）で届いた意見。管理画面で読む。
+
+    友達に使ってもらったあとの感想・不具合・ほしい機能を集めるためのもの。
+    タスクと違い、管理者が読むことを前提にしている（送る画面にもそう書いてある）。
+    """
+
+    # 1人が1日に送れる件数（いたずらや、押しまちがいの連打で増えすぎないように）
+    DAILY_LIMIT = 10
+
+    class Kind(models.TextChoices):
+        GOOD = "good", "😀 よかった"
+        BUG = "bug", "🐞 うまく動かない"
+        IDEA = "idea", "💡 こうしてほしい"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,  # ユーザーを消しても、意見は名前なしで残す
+        null=True,
+        blank=True,
+        related_name="feedbacks",
+        verbose_name="送った人",
+    )
+    kind = models.CharField("種類", max_length=10, choices=Kind.choices)
+    body = models.TextField("内容", max_length=1000)
+    # どの画面で ？ を押したか（例：/map/room/3/）。不具合のときに、どこで起きたかが分かる
+    page = models.CharField("どの画面から", max_length=200, blank=True)
+    is_resolved = models.BooleanField("対応済み", default=False)
+    created_at = models.DateTimeField("送った日時", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "意見"
+        verbose_name_plural = "意見"
+        ordering = ["-created_at"]  # 新しい順
+
+    def __str__(self):
+        return f"{self.get_kind_display()}：{self.body[:30]}"

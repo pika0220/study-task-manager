@@ -31,6 +31,7 @@ urlpatterns = [
     # 使い方（Issue #47）
     path("guide/", views.guide, name="guide"),
     path("help/", views.help_page, name="help"),
+    path("help/feedback/", views.feedback_create, name="feedback_create"),
     # 進み具合（F-06）
     path("progress/", views.progress, name="progress"),
     # 資料（プログラムの中の名前は source）
