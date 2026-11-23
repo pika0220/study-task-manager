@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from .images import sanitize_photo
-from .models import Category, Source, Task
+from .models import Category, Feedback, Source, Task
 
 NEW_CATEGORY = "__new__"  # 分類の選択肢「＋ 新しい分類…」の値
 
@@ -304,3 +304,25 @@ class SourceForm(forms.ModelForm):
             if count >= Source.MAX_PHOTOS_PER_USER:
                 raise ValidationError(f"写真は1人{Source.MAX_PHOTOS_PER_USER}枚までです．使わない写真を消してください．")
         return sanitize_photo(upload)
+
+
+class FeedbackForm(forms.ModelForm):
+    """ヘルプの「✉️ 意見を送る」（Issue #48）。種類を選んで、内容を書く。"""
+
+    # 種類は3つから選ぶだけ。ModelForm が自動で足す「---------」（選ばない）は出さない
+    kind = forms.ChoiceField(label="どんな意見？", choices=Feedback.Kind.choices, widget=forms.RadioSelect)
+
+    class Meta:
+        model = Feedback
+        fields = ["kind", "body"]
+        widgets = {
+            "body": forms.Textarea(
+                attrs={
+                    "class": "textarea w-full",
+                    "rows": 6,
+                    "maxlength": 1000,
+                    "placeholder": "例：マップで線を引くと，点がずれる",
+                }
+            ),
+        }
+        labels = {"body": "内容（1000字まで）"}

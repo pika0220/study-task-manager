@@ -3,6 +3,7 @@
   ヘルプ（Issue #47）。上のバーの ？ から開く。
   - 📖 使い方：最初から、または章ごとに（/guide/#map のように開くと、その章から）
   - 🔣 記号の一覧：アプリの中で使っている記号と意味
+  - ✉️ 意見を送る（Issue #48）：どの画面で ？ を押したか（from）も一緒に運ぶ
 {% endcomment %}
 
 {% block title %}ヘルプ{% endblock %}
@@ -23,6 +24,9 @@
       </li>
     {% endfor %}
   </ul>
+
+  <h2 class="mb-2 font-bold">✉️ 意見・不具合</h2>
+  <a href="{% url 'feedback_create' %}{% if from_page %}?from={{ from_page|urlencode:'' }}{% endif %}" class="btn btn-outline btn-block mb-6 min-h-12">✉️ 意見を送る</a>
 
   <h2 class="mb-2 font-bold">🔣 記号の一覧</h2>
   <div class="overflow-hidden rounded-box bg-base-100 shadow-sm">

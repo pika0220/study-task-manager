@@ -17,8 +17,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, UpdateView
 
-from .forms import SourceForm, TaskForm
-from .models import Category, Source, Task
+from .forms import FeedbackForm, SourceForm, TaskForm
+from .models import Category, Feedback, Source, Task
 
 
 # ---- 戻り先（Issue #41）----
@@ -1100,7 +1100,40 @@ def guide(request):
     return render(request, "tasks/guide.html")
 
 
+def _from_page(request):
+    """どの画面で ？ を押したか（?from=/map/room/3/）。このサイトの中の道（/ で始まる）だけを、200字まで。
+
+    管理画面で読むためだけに使い、移動先には使わない。「?」から後ろ（検索の条件など）は残さない。
+    """
+    value = request.POST.get("from") or request.GET.get("from") or ""
+    if not value.startswith("/") or value.startswith("//"):
+        return ""
+    return urlsplit(value).path[:200]
+
+
 @login_required
 def help_page(request):
-    """ヘルプ（上のバーの ？）。使い方（章ごと）と、記号の一覧。"""
-    return render(request, "tasks/help.html", {"chapters": GUIDE_CHAPTERS})
+    """ヘルプ（上のバーの ？）。使い方（章ごと）・記号の一覧・意見を送る。"""
+    return render(request, "tasks/help.html", {"chapters": GUIDE_CHAPTERS, "from_page": _from_page(request)})
+
+
+@login_required
+def feedback_create(request):
+    """✉️ 意見を送る（Issue #48）。送った意見は、管理画面の「意見」で読む。"""
+    from_page = _from_page(request)
+    since = timezone.now() - timedelta(days=1)
+    sent_today = request.user.feedbacks.filter(created_at__gte=since).count()
+    limit_reached = sent_today >= Feedback.DAILY_LIMIT
+    form = FeedbackForm(request.POST or None)
+    if request.method == "POST" and not limit_reached and form.is_valid():
+        feedback = form.save(commit=False)
+        feedback.user = request.user
+        feedback.page = from_page
+        feedback.save()
+        messages.success(request, "✉️ 送りました．ありがとうございます！")
+        return redirect("help")
+    return render(
+        request,
+        "tasks/feedback.html",
+        {"form": form, "from_page": from_page, "limit_reached": limit_reached, "limit": Feedback.DAILY_LIMIT},
+    )
