@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from .images import sanitize_photo
-from .models import Category, Feedback, Source, Task
+from .models import Category, Feedback, Source, Task, category_named
 
 NEW_CATEGORY = "__new__"  # 分類の選択肢「＋ 新しい分類…」の値
 
@@ -234,7 +234,7 @@ class TaskForm(forms.ModelForm):
                 cleaned["category"] = None
             else:
                 # 同じ名前の分類がもうあれば、それを使う（書き方がずれて2つにならないように）
-                existing = self.user.categories.filter(name=name).first()
+                existing = category_named(self.user, name)
                 if existing:
                     cleaned["category"] = existing
                 else:

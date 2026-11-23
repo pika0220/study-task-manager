@@ -6,7 +6,6 @@ from urllib.parse import urlencode, urlsplit
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, Http404, JsonResponse
@@ -18,7 +17,7 @@ from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, UpdateView
 
 from .forms import FeedbackForm, SourceForm, TaskForm
-from .models import Category, Feedback, Source, Task
+from .models import Category, Feedback, Source, Task, category_named
 
 
 # ---- 戻り先（Issue #41）----
@@ -303,11 +302,12 @@ def category_list(request):
 def category_create(request):
     name = _clean_category_name(request, request.POST.get("name"))
     if name:
-        _, created = request.user.categories.get_or_create(name=name)
-        if created:
-            messages.success(request, f"分類「{name}」を作りました．")
-        else:
+        # 名前は暗号化しているので、同じ名前があるかは Python の中でくらべる（category_named）
+        if category_named(request.user, name):
             messages.info(request, f"分類「{name}」はもうあります．")
+        else:
+            request.user.categories.create(name=name)
+            messages.success(request, f"分類「{name}」を作りました．")
     return redirect(_with_back(request, reverse("category_list")))  # 戻り先（マップなど）を付けたまま
 
 
@@ -317,16 +317,13 @@ def category_update(request, pk):
     category = get_object_or_404(request.user.categories, pk=pk)
     name = _clean_category_name(request, request.POST.get("name"))
     if name and name != category.name:
-        old = category.name
-        category.name = name
-        try:
-            # atomic：失敗したときに、データベースの作業をここだけ取り消して、ほかの作業を続けられるようにする
-            with transaction.atomic():
-                category.save()
-        except IntegrityError:
-            # 同じ名前の分類がもうある（データベースのルールで止まった）
+        if category_named(request.user, name):
+            # 同じ名前の分類がもうある（名前は暗号化しているので、Python の中でくらべる）
             messages.error(request, f"分類「{name}」はもうあります．")
         else:
+            old = category.name
+            category.name = name
+            category.save()
             messages.success(request, f"「{old}」を「{name}」に変えました．")
     return redirect(_with_back(request, reverse("category_list")))  # 戻り先（マップなど）を付けたまま
 

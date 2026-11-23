@@ -4,6 +4,7 @@
   - 📖 使い方：最初から、または章ごとに（/guide/#map のように開くと、その章から）
   - 🔣 記号の一覧：アプリの中で使っている記号と意味
   - ✉️ 意見を送る（Issue #48）：どの画面で ？ を押したか（from）も一緒に運ぶ
+  - 🛡️ プライバシー（Issue #49）：本当のことだけを書く（tasks/encryption.py の「できないこと」も参照）
 {% endcomment %}
 
 {% block title %}ヘルプ{% endblock %}
@@ -27,6 +28,13 @@
 
   <h2 class="mb-2 font-bold">✉️ 意見・不具合</h2>
   <a href="{% url 'feedback_create' %}{% if from_page %}?from={{ from_page|urlencode:'' }}{% endif %}" class="btn btn-outline btn-block mb-6 min-h-12">✉️ 意見を送る</a>
+
+  <h2 class="mb-2 font-bold">🛡️ プライバシー</h2>
+  <ul class="mb-6 flex flex-col gap-1 rounded-box bg-base-100 p-4 text-sm shadow-sm">
+    <li>🔐 タイトル・メモ・分類の名前・資料（リンク・メモ・写真）→ 暗号化して保存</li>
+    <li>📊 管理画面に出るのは件数だけ（例：タスク 12件・完了 5件）．中身は出ない</li>
+    <li>✉️ 意見は管理者が読む（ユーザー名も一緒に）</li>
+  </ul>
 
   <h2 class="mb-2 font-bold">🔣 記号の一覧</h2>
   <div class="overflow-hidden rounded-box bg-base-100 shadow-sm">

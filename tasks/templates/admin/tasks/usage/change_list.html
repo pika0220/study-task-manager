@@ -1,0 +1,18 @@
+{% extends "admin/change_list.html" %}
+{% comment %}
+  管理画面の「利用状況」（Issue #49）。いつもの一覧の上に「全体」の表を足す。
+  出すのは人数と件数だけ。タスクの中身（タイトル・メモなど）は出さない。
+{% endcomment %}
+
+{% block result_list %}
+  <h2>全体（1回でも使った人の数）</h2>
+  <table style="margin-bottom: 1.5rem">
+    <tbody>
+      {% for label, number in usage_summary %}
+        <tr><th scope="row">{{ label }}</th><td style="text-align: right">{{ number }} 人</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <h2>ユーザーごと（件数）</h2>
+  {{ block.super }}
+{% endblock %}

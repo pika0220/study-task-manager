@@ -1,9 +1,12 @@
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
+
+from .encryption import EncryptedCharField, EncryptedTextField, EncryptedURLField, photo_storage
 
 
 # ユーザー登録のときに用意する分類（名前の変更や削除もできる）
@@ -19,20 +22,27 @@ class Category(models.Model):
         related_name="categories",
         verbose_name="持ち主",
     )
-    name = models.CharField("名前", max_length=50)
+    # 名前は暗号化して保存する（Issue #49）。そのため「同じ名前を2つ作らない」はデータベースではなく、
+    # category_named()（下）で確かめる
+    name = EncryptedCharField("名前", max_length=50)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
 
     class Meta:
         verbose_name = "分類"
         verbose_name_plural = "分類"
         ordering = ["created_at", "id"]  # 作った順に並べる
-        constraints = [
-            # 同じ人が同じ名前の分類を2つ作れないようにする（データベースが守るルール）
-            models.UniqueConstraint(fields=["owner", "name"], name="unique_category_name_per_owner"),
-        ]
 
     def __str__(self):
         return self.name
+
+
+def category_named(user, name):
+    """user の分類のうち、名前が name のものを返す（なければ None）。
+
+    分類の名前は暗号化して保存しているので、データベースでは名前で探せない。
+    1人の分類は多くても数十なので、全部読んで Python の中でくらべる。
+    """
+    return next((category for category in user.categories.all() if category.name == name), None)
 
 
 class Task(models.Model):
@@ -52,8 +62,9 @@ class Task(models.Model):
         related_name="tasks",
         verbose_name="持ち主",
     )
-    title = models.CharField("タイトル", max_length=200)
-    memo = models.TextField("メモ", blank=True)
+    # タイトルとメモは暗号化して保存する（Issue #49）。データベースの中で「タイトルが○○」とは探せない
+    title = EncryptedCharField("タイトル", max_length=200)
+    memo = EncryptedTextField("メモ", blank=True)
     due_at = models.DateTimeField("締切", null=True, blank=True)
     importance = models.PositiveSmallIntegerField(
         "重要度", choices=Importance.choices, default=Importance.MEDIUM
@@ -295,16 +306,18 @@ class Source(models.Model):
         verbose_name="タスク",
     )
     kind = models.CharField("種類", max_length=20, choices=Kind.choices, default=Kind.PAPER)
-    url = models.URLField(
+    # リンク・メモ・写真は暗号化して保存する（Issue #49）
+    url = EncryptedURLField(
         "リンク",
         max_length=500,
         blank=True,
         # http:// と https:// だけを受け付ける（javascript: などの危ないリンクを入れさせない）
         validators=[URLValidator(schemes=["http", "https"])],
     )
-    memo = models.CharField("メモ", max_length=200, blank=True)
-    # 写真は誰でも開ける場所には置かず、持ち主だけが見られる画面（source_photo）を通して表示する
-    photo = models.ImageField("写真", upload_to=source_photo_path, blank=True)
+    memo = EncryptedCharField("メモ", max_length=200, blank=True)
+    # 写真は誰でも開ける場所には置かず、持ち主だけが見られる画面（source_photo）を通して表示する。
+    # ファイルは暗号化して置き、見るときだけ元に戻す（photo_storage）
+    photo = models.ImageField("写真", upload_to=source_photo_path, blank=True, storage=photo_storage)
     created_at = models.DateTimeField("作成日時", auto_now_add=True)
 
     class Meta:
@@ -359,3 +372,15 @@ class Feedback(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()}：{self.body[:30]}"
+
+
+class Usage(User):
+    """管理画面の「利用状況」（Issue #49）のための、ユーザーの別の見せ方（proxy：表は増えない）。
+
+    管理画面には、タスクの中身（タイトル・メモなど）は出さず、件数だけを出す。数え方は admin.py の UsageAdmin。
+    """
+
+    class Meta:
+        proxy = True
+        verbose_name = "利用状況"
+        verbose_name_plural = "利用状況"
