@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% comment %}
-  登録・子タスクの追加・編集で使い回す画面。
+  登録・サブタスクの追加・編集で使い回す画面。
   見出しやボタンの文字は、ビューから page_title・submit_label・cancel_url で渡す。
 {% endcomment %}
 
@@ -12,7 +12,7 @@
     <div class="card-body">
       <h1 class="card-title text-xl">{{ page_title }}</h1>
       {% if not object %}
-        <p class="text-sm text-base-content/60">タイトルだけでも登録できます．</p>
+        <p class="text-sm text-base-content/60">必要なのはタイトルだけ（ほかはあとからでも）</p>
       {% endif %}
 
       <form method="post" class="flex flex-col gap-1">
@@ -23,7 +23,7 @@
 
         {% include "partials/form_field.html" with field=form.title %}
 
-        <!-- つながり：親子（📁 中の作業）と前後（🔒 終わってから）を、1つの枠にまとめる -->
+        <!-- つながり：親子（📁 サブタスク）と前後（🔒 終わってから）を、1つの枠にまとめる -->
         <div class="mt-2 rounded-box border border-base-300 bg-base-200/50 px-3 pb-3">
           <p class="pt-3 text-sm font-bold">つながり（なくてもよい）</p>
           {% for field in form.relation_fields %}
@@ -37,7 +37,7 @@
             <!-- 親を選んだときは、分類の欄のかわりにこれを見せる（分類は親と同じになるため） -->
             <fieldset class="fieldset" id="category-follows-parent" hidden>
               <legend class="fieldset-legend">分類</legend>
-              <p class="text-sm">📁 ＝ 親と同じ：<span class="badge badge-outline" data-parent-category></span></p>
+              <p class="text-sm">📁 サブタスク → 上のタスクと同じ：<span class="badge badge-outline" data-parent-category></span></p>
             </fieldset>
           {% endif %}
         {% endfor %}
@@ -53,7 +53,7 @@
   <script>
     // 分類の欄の見せ方。JavaScriptが動かない環境では、欄はずっと見えたまま（それでも登録はできる）
     //   - 「＋ 新しい分類…」を選んだときだけ、名前を書く欄を見せる
-    //   - 親（📁 どのタスクの中の作業？）を選んだら、分類の欄を隠して「📁 ＝ 親と同じ：○○」を見せる
+    //   - 親（📁 どのタスクのサブタスク？）を選んだら、分類の欄を隠して「📁 サブタスク → 上のタスクと同じ：○○」を見せる
     (() => {
       const select = document.querySelector('select[name="category"]');
       const box = document.getElementById("field-new_category_name");

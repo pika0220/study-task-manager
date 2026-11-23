@@ -1,8 +1,8 @@
 {% comment %}
-  子タスクを開いたり閉じたりする部品。使い方：{% include "tasks/_children_toggle.html" with parent=task %}
+  サブタスクを開いたり閉じたりする部品。使い方：{% include "tasks/_children_toggle.html" with parent=task %}
   <details> と <summary>：HTMLにもともとある「押すと開く・閉じる」部品。JavaScriptを書かなくても動く。
-  子タスクの行（_child_row.html）の中でもこの部品を使うので、孫タスクも同じように開ける。
-  level：parent が何段目か。3段目（Task.MAX_DEPTH）の下には子タスクを足せないので「＋」を出さない。
+  サブタスクの行（_child_row.html）の中でもこの部品を使うので、サブタスクのサブタスクも同じように開ける。
+  level：parent が何段目か。3段目（Task.MAX_DEPTH）の下にはサブタスクを足せないので「＋」を出さない。
 {% endcomment %}
 {% with total=parent.children.all|length %}
   {% if total %}
@@ -12,7 +12,7 @@
         <!-- 開いているときは ▶ を90度回して ▼ に見せる（自分のすぐ外の details が開いているときだけ回す。孫の▶は別に回る） -->
         <span class="inline-block w-4 text-center transition-transform [details[open]>summary>&]:rotate-90" aria-hidden="true">▶</span>
         <progress class="progress progress-primary w-full" value="{{ parent.progress }}" max="100"></progress>
-        <span class="shrink-0 text-xs">📁 子タスク {{ total }}件・{{ parent.progress }}%</span>
+        <span class="shrink-0 text-xs">📁 サブタスク {{ total }}件・{{ parent.progress }}%</span>
       </summary>
       <ul class="mt-1 ml-2 flex flex-col border-l-2 border-base-300 pl-3">
         {% for child in parent.children.all %}
@@ -20,7 +20,7 @@
         {% endfor %}
         {% if level < 3 %}
           <li>
-            <a href="{% url 'task_create_child' parent.pk %}" class="btn btn-ghost btn-sm min-h-11 px-1 text-primary">＋ 子タスクを追加</a>
+            <a href="{% url 'task_create_child' parent.pk %}" class="btn btn-ghost btn-sm min-h-11 px-1 text-primary">＋ サブタスク</a>
           </li>
         {% endif %}
       </ul>

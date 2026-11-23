@@ -57,7 +57,7 @@
         <div class="text-sm text-base-content/70">🔒 「{{ task.prerequisite.title }}」が終わってから</div>
       {% endif %}
 
-      <!-- 子タスクがあれば「▶ 子タスク○件」を出し、押すとカードの中に開く -->
+      <!-- サブタスクがあれば「▶ サブタスク○件」を出し、押すとカードの中に開く -->
       <!-- level：このカードのタスクが何段目か（ホームは1段目。詳細画面では card_level で渡す） -->
       {% include "tasks/_children_toggle.html" with parent=task level=card_level|default:1 %}
     </div>

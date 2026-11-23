@@ -58,19 +58,19 @@
     </div>
   </div>
 
-  <!-- つながり：親子（📁 中の作業）は「上下」、前後（🔒 終わってから）は「左から右」で見せる -->
+  <!-- つながり：親子（📁 サブタスク）は「上下」、前後（🔒 終わってから）は「左から右」で見せる -->
   <h2 class="mt-6 mb-3 text-lg font-bold">つながり</h2>
   <div class="card bg-base-100 shadow-sm">
     <div class="card-body gap-3 p-4 text-sm">
       <p>
         📁
         {% if task.parent %}
-          「<a href="{% url 'task_detail' task.parent.pk %}" class="link">{{ task.parent.title }}</a>」の中の作業
+          「<a href="{% url 'task_detail' task.parent.pk %}" class="link">{{ task.parent.title }}</a>」のサブタスク
         {% else %}
-          <span class="text-base-content/60">ほかのタスクの中には入っていない</span>
+          <span class="text-base-content/60">いちばん上のタスク</span>
         {% endif %}
         {% with n=task.children.all|length %}
-          {% if n %}<span class="text-base-content/60">（このタスクの中の作業：子タスク{{ n }}件）</span>{% endif %}
+          {% if n %}<span class="text-base-content/60">（サブタスク {{ n }}件）</span>{% endif %}
         {% endwith %}
       </p>
 
@@ -105,7 +105,7 @@
           </div>
         </div>
       {% else %}
-        <p class="text-base-content/60">🔒 前後のつながりはまだありません．「編集」の「何が終わってから取りかかる？」で設定できます．</p>
+        <p class="text-base-content/60">🔒 なし（編集 → 🔒 何が終わってから取りかかる？）</p>
       {% endif %}
     </div>
   </div>
@@ -141,13 +141,13 @@
           </form>
         </div>
       {% empty %}
-        <p class="text-sm text-base-content/60">プリントの写真・スライドやClassroomのリンク・口頭で言われたことのメモなど，課題の指示に関係するものを残しておけます．</p>
+        <p class="text-sm text-base-content/60">課題の指示を残す：プリントの写真・Classroom やスライドのリンク・口頭のメモ など</p>
       {% endfor %}
 
       <!-- 資料を足すフォーム（押すと開く） -->
       <details {% if not task.sources.all %}open{% endif %}>
         <summary class="flex min-h-11 cursor-pointer list-none items-center font-bold text-primary [&::-webkit-details-marker]:hidden">＋ 資料を追加</summary>
-        <p class="text-sm text-base-content/70">リンク・メモ・写真の，どれか1つ以上を入れてください（いくつ入れてもかまいません）．</p>
+        <p class="text-sm text-base-content/70">リンク・メモ・写真 → 1つ以上（いくつでも）</p>
         <!-- enctype="multipart/form-data"：ファイル（写真）を送るフォームに必要な設定 -->
         <form method="post" action="{% url 'source_create' task.pk %}" enctype="multipart/form-data" class="flex flex-col gap-1">
           {% csrf_token %}
@@ -160,11 +160,11 @@
     </div>
   </div>
 
-  <!-- 子タスクの一覧 -->
+  <!-- サブタスクの一覧 -->
   <div class="mt-6 mb-3 flex items-center justify-between gap-2">
-    <h2 class="text-lg font-bold">📁 子タスク（{{ task.children.all|length }}件）</h2>
+    <h2 class="text-lg font-bold">📁 サブタスク（{{ task.children.all|length }}件）</h2>
     {% if can_add_child %}
-      <a href="{% url 'task_create_child' task.pk %}" class="btn btn-primary btn-sm">＋ 子タスクを追加</a>
+      <a href="{% url 'task_create_child' task.pk %}" class="btn btn-primary btn-sm">＋ サブタスク</a>
     {% endif %}
   </div>
 
@@ -175,11 +175,11 @@
       {% endfor %}
     </div>
   {% elif can_add_child %}
-    <p class="text-sm text-base-content/60">大きなタスクは，小さなタスクに分けると進めやすくなります．</p>
+    <p class="text-sm text-base-content/60">大きなタスク → ＋ サブタスク で小さく分ける</p>
   {% endif %}
 
   {% if not can_add_child %}
-    <p class="text-sm text-base-content/60">このタスクは3段目なので，これ以上子タスクを付けられません．</p>
+    <p class="text-sm text-base-content/60">3段目 → 📁 サブタスクは付けられない（🔒 でつなげる）</p>
   {% endif %}
 
   {% include "tasks/_link_dialog.html" %}

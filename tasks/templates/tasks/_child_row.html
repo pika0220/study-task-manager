@@ -1,5 +1,5 @@
 {% comment %}
-  カードの中で開いたときの、子タスク1件の行。カードより小さく、必要なものだけ出す。
+  カードの中で開いたときの、サブタスク1件の行。カードより小さく、必要なものだけ出す。
   使い方：{% include "tasks/_child_row.html" with task=child level=段の数 %}
 {% endcomment %}
 <li data-task-id="{{ task.pk }}" data-title="{{ task.title }}" class="flex items-start gap-3 py-1">
@@ -29,7 +29,7 @@
         {% endwith %}
       {% endif %}
     </div>
-    <!-- 孫タスクがあれば、同じ部品でさらに開ける -->
+    <!-- サブタスクのサブタスクがあれば、同じ部品でさらに開ける -->
     {% include "tasks/_children_toggle.html" with parent=task level=level %}
   </div>
 </li>

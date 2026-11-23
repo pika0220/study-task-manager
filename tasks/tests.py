@@ -47,7 +47,7 @@ class HomeViewTests(TestCase):
         self.assertEqual([t.title for t in response.context["open_tasks"]], ["国家試験"])
         self.assertEqual([t.title for t in response.context["done_tasks"]], ["レポート提出"])
         self.assertContains(response, "重要度 高")
-        self.assertContains(response, "子タスク 1件・0%")
+        self.assertContains(response, "サブタスク 1件・0%")
         # 子タスクは別のカードにしない（上の open_tasks が1件）。親のカードの中に1回だけ出る
         self.assertContains(response, ">薬理学の問題集</a>", count=1)
         # ほかの人のタスクは出さない
@@ -194,7 +194,7 @@ class TaskDetailEditTests(TestCase):
         Task.objects.create(owner=self.me, title="薬理学", parent=self.exam)
         response = self.client.get(reverse("task_detail", args=[self.exam.pk]))
         self.assertContains(response, "国家試験")
-        self.assertContains(response, "子タスク（1件）")
+        self.assertContains(response, "サブタスク（1件）")
         self.assertContains(response, "薬理学")
         self.assertContains(response, reverse("task_create_child", args=[self.exam.pk]))
 
@@ -242,7 +242,7 @@ class TaskDetailEditTests(TestCase):
         chapter = Task.objects.create(owner=self.me, title="第1章", parent=subject)
         detail = self.client.get(reverse("task_detail", args=[chapter.pk]))
         self.assertNotContains(detail, reverse("task_create_child", args=[chapter.pk]))
-        self.assertContains(detail, "これ以上子タスクを付けられません")
+        self.assertContains(detail, "3段目 → 📁 サブタスクは付けられない")
         # URLを直接開いても作れず、詳細画面に戻される
         url = reverse("task_create_child", args=[chapter.pk])
         response = self.client.post(url, {"title": "4段目", "importance": 2})
@@ -284,8 +284,8 @@ class CardChildrenTests(TestCase):
         Task.objects.create(owner=self.me, title="問題集 第1章", parent=subject, is_done=True)
         response = self.client.get(reverse("home"))
         # 子・孫の名前がカードの中（開く部分）に入っていて、それぞれ切り替えボタンと詳細へのリンクがある
-        self.assertContains(response, "子タスク 1件・0%")
-        self.assertContains(response, "子タスク 1件・100%")
+        self.assertContains(response, "サブタスク 1件・0%")
+        self.assertContains(response, "サブタスク 1件・100%")
         self.assertContains(response, "薬理学")
         self.assertContains(response, "問題集 第1章")
         self.assertContains(response, reverse("task_toggle", args=[subject.pk]))
@@ -326,7 +326,7 @@ class ParentSelectTests(TestCase):
     def test_create_form_lists_parents_as_tree(self):
         labels = self.choices(self.client.get(reverse("task_create")))
         # 親の下に子が字下げされて並ぶ。3段目・完了・他の人のタスクは出ない
-        self.assertEqual(labels, ["なし（ほかのタスクの中に入れない）", "国家試験", "　└ 薬理学"])
+        self.assertEqual(labels, ["なし（いちばん上のタスク）", "国家試験", "　└ 薬理学"])
 
     def test_create_child_from_menu(self):
         response = self.client.post(
@@ -349,7 +349,7 @@ class ParentSelectTests(TestCase):
         other_top = Task.objects.create(owner=self.me, title="卒業研究")
         Task.objects.create(owner=self.me, title="文献調査", parent=other_top)
         labels = self.choices(self.client.get(reverse("task_update", args=[self.subject.pk])))
-        self.assertEqual(labels, ["なし（ほかのタスクの中に入れない）", "国家試験", "卒業研究"])
+        self.assertEqual(labels, ["なし（いちばん上のタスク）", "国家試験", "卒業研究"])
 
     def test_move_task_to_another_parent(self):
         other_top = Task.objects.create(owner=self.me, title="卒業研究")
@@ -497,7 +497,7 @@ class SourceTests(TestCase):
 
     def test_form_explains_link_or_memo(self):
         response = self.client.get(reverse("task_detail", args=[self.task.pk]))
-        self.assertContains(response, "リンク・メモ・写真の，どれか1つ以上を入れてください")
+        self.assertContains(response, "リンク・メモ・写真 → 1つ以上（いくつでも）")
         self.assertNotContains(response, "なくてもよい）</legend>")
 
     def test_add_source_with_memo_only(self):
@@ -720,8 +720,8 @@ class PrerequisiteTests(TestCase):
         cases = [
             (self.survey, self.outline, "輪になってしまいます"),
             (self.survey, self.survey, "自分自身は選べません"),
-            (self.survey, self.research, "自分の親タスクは選べません"),
-            (self.research, self.survey, "自分の子タスクは選べません"),
+            (self.survey, self.research, "自分が入っている上のタスクは選べません"),
+            (self.research, self.survey, "自分のサブタスクは選べません"),
         ]
         for task, prereq, message in cases:
             task.prerequisite = prereq
@@ -766,23 +766,23 @@ class PrerequisiteTests(TestCase):
         response = self.client.get(reverse("task_create"))
         html = response.content.decode()
         self.assertIn("つながり（なくてもよい）", html)
-        self.assertIn("📁 どのタスクの中の作業？", html)
+        self.assertIn("📁 どのタスクのサブタスク？", html)
         self.assertIn("🔒 何が終わってから取りかかる？", html)
         # 2つの質問は「つながり」の枠の中に並び、締切の欄より前にある
-        self.assertLess(html.index("つながり（なくてもよい）"), html.index("📁 どのタスクの中の作業？"))
+        self.assertLess(html.index("つながり（なくてもよい）"), html.index("📁 どのタスクのサブタスク？"))
         self.assertLess(html.index("🔒 何が終わってから取りかかる？"), html.index('id="field-due_at"'))
 
     def test_detail_shows_relation_diagram(self):
         self.outline.prerequisite = self.survey
         self.outline.save()
         response = self.client.get(reverse("task_detail", args=[self.outline.pk]))
-        self.assertContains(response, "「<a href=\"%s\" class=\"link\">卒業研究</a>」の中の作業" % reverse("task_detail", args=[self.research.pk]), html=False)
+        self.assertContains(response, "「<a href=\"%s\" class=\"link\">卒業研究</a>」のサブタスク" % reverse("task_detail", args=[self.research.pk]), html=False)
         self.assertContains(response, "このタスク")
         self.assertContains(response, "🔒 まだ")
         # つながりがないタスクには案内を出す
         response = self.client.get(reverse("task_detail", args=[self.research.pk]))
-        self.assertContains(response, "前後のつながりはまだありません")
-        self.assertContains(response, "このタスクの中の作業：子タスク2件")
+        self.assertContains(response, "🔒 なし（編集 → 🔒 何が終わってから取りかかる？）")
+        self.assertContains(response, "（サブタスク 2件）")
 
     def test_detail_shows_prerequisite_and_next(self):
         self.outline.prerequisite = self.survey
@@ -826,14 +826,14 @@ class DragLinkTests(TestCase):
         self.assertIn("3段まで", self.options(self.report, self.chapter)["child"]["reason"])
         data = self.options(self.exam, self.subject)
         self.assertFalse(data["child"]["ok"])
-        self.assertIn("子タスクは選べません", data["after"]["reason"])
+        self.assertIn("サブタスクは選べません", data["after"]["reason"])
         # 同じタスク同士
         same = self.options(self.report, self.report)
         self.assertEqual(same["child"]["reason"], "同じタスクです．")
 
     def test_link_as_child(self):
         response = self.link(self.report, self.exam, "child")
-        self.assertContains(response, "「レポート」を「国家試験」の中に入れました")
+        self.assertContains(response, "「レポート」を「国家試験」のサブタスクにしました")
         self.report.refresh_from_db()
         self.assertEqual(self.report.parent, self.exam)
 
@@ -892,7 +892,7 @@ class DragLinkTests(TestCase):
         self.assertContains(response, f'data-task-id="{self.report.pk}" data-title="レポート"')
         self.assertContains(response, 'id="link-dialog"')
         self.assertContains(response, "tasks/drag_link.js")
-        self.assertContains(response, "カードを長押しして別のカードに重ねると")
+        self.assertContains(response, "カードを長押し → 別のカードに重ねる")
 
 
 class MindMapTests(TestCase):
@@ -996,7 +996,7 @@ class MindMapTests(TestCase):
         self.assertEqual(child.pk, nodes["1章"]["id"])
 
     def test_second_placed_tree_goes_below_the_first(self):
-        # 中の作業が上と下に出る木（上に出る分も考えて、重ならない場所に置けるか）
+        # サブタスクが上と下に出る木（上に出る分も考えて、重ならない場所に置けるか）
         Task.objects.create(owner=self.me, title="1章", parent=self.paper)
         Task.objects.create(owner=self.me, title="2章", parent=self.paper)
         first_tree = self.nodes()
@@ -1150,7 +1150,7 @@ class MindMapTests(TestCase):
         response = self.add(title="構成を考える", anchor=self.study.pk, relation="child")
         task = Task.objects.get(title="構成を考える")
         self.assertEqual((task.parent, task.category), (self.study, self.research))
-        self.assertContains(response, "「構成を考える」を「卒業研究」の中に足しました．")
+        self.assertContains(response, "「構成を考える」を「卒業研究」のサブタスクとして足しました．")
 
     def test_add_after_a_child_is_placed_next_to_it(self):
         self.add(title="考察を書く", anchor=self.reading.pk, relation="after")
@@ -1190,7 +1190,7 @@ class MindMapTests(TestCase):
 
     def test_unlink_parent_keeps_the_task_in_the_room(self):
         response = self.post_link("task_unlink", self.reading, "child")
-        self.assertContains(response, "「文献調査」を「卒業研究」の中から出しました（この部屋に残ります）．")
+        self.assertContains(response, "「文献調査」を「卒業研究」のサブタスクから外しました（この部屋に残ります）．")
         self.reading.refresh_from_db()
         self.assertEqual((self.reading.parent, self.reading.category, self.reading.on_map), (None, self.research, True))
         self.assertTrue(self.nodes()["文献調査"]["top"])
@@ -1239,7 +1239,7 @@ class MindMapTests(TestCase):
 
 
 class ProgressTests(TestCase):
-    """進み具合（F-06）。数えるのは中の作業がないタスクだけ。全体・分類ごと・メインタスクごと。"""
+    """進み具合（F-06）。数えるのはサブタスクがないタスクだけ。全体・分類ごと・サブタスクのあるタスクごと。"""
 
     def setUp(self):
         User = get_user_model()
@@ -1251,7 +1251,7 @@ class ProgressTests(TestCase):
         self.study = Task.objects.create(owner=self.me, title="卒業研究", category=self.research)
         Task.objects.create(owner=self.me, title="文献調査", parent=self.study, category=self.research, is_done=True)
         self.outline = Task.objects.create(owner=self.me, title="構成を考える", parent=self.study, category=self.research)
-        # 中の作業がないタスク
+        # サブタスクがないタスク
         Task.objects.create(owner=self.me, title="実習記録", category=self.practice, is_done=True)
         self.late = Task.objects.create(
             owner=self.me, title="期限切れの課題", due_at=timezone.now() - timedelta(days=1)
@@ -1287,7 +1287,7 @@ class ProgressTests(TestCase):
 
     def test_main_tasks_show_only_open_ones_with_children(self):
         main_tasks = self.get().context["main_tasks"]
-        self.assertEqual([m["task"].title for m in main_tasks], ["卒業研究"])  # 中の作業がないタスクは出さない
+        self.assertEqual([m["task"].title for m in main_tasks], ["卒業研究"])  # サブタスクがないタスクは出さない
         self.assertEqual((main_tasks[0]["done"], main_tasks[0]["total"]), (1, 2))
         self.study.is_done = True
         self.study.save()
@@ -1296,12 +1296,12 @@ class ProgressTests(TestCase):
     def test_grandchildren_count_toward_their_main_task(self):
         Task.objects.create(owner=self.me, title="第1章", parent=self.outline)
         main = self.get().context["main_tasks"][0]
-        # 構成を考える は中の作業ができたので数えず、第1章を数える
+        # 構成を考える はサブタスクができたので数えず、第1章を数える
         self.assertEqual((main["done"], main["total"]), (1, 2))
 
     def test_page_shows_bars_and_links(self):
         response = self.get()
-        self.assertContains(response, "1件＝中の作業がないタスク")
+        self.assertContains(response, "1件 ＝ サブタスクのないタスク")
         self.assertContains(response, reverse("task_detail", args=[self.outline.pk]))
         self.assertContains(response, reverse("task_map_root", args=[self.study.pk]))
         self.assertContains(response, "<progress", count=1 + 3 + 1)  # 全体・分類3つ・メインタスク1つ
@@ -1414,7 +1414,7 @@ class CategoryFollowsTopTests(TestCase):
     def test_link_dialog_tells_category_change(self):
         url = reverse("task_link_options", args=[self.report.pk])
         data = self.client.get(url, {"target": self.study.pk}).json()
-        self.assertEqual(data["child"]["notes"], ["分類：授業 → 研究（中の作業もそろう）"])
+        self.assertEqual(data["child"]["notes"], ["分類：授業 → 研究（サブタスクもそろう）"])
         self.assertEqual(data["after"]["notes"], [])  # 前後でつないでも、分類は変わらない
 
     def test_link_dialog_tells_replacing_current_links(self):
@@ -1428,7 +1428,7 @@ class CategoryFollowsTopTests(TestCase):
         # 別の相手（発表）なら、今の親・今の先にやることを入れかえることになる
         target = Task.objects.create(owner=self.me, title="発表", category=self.research)
         data = self.client.get(url, {"target": target.pk}).json()
-        self.assertIn("⚠ 今：「卒業研究」の中 → 入れかえ", data["child"]["notes"])
+        self.assertIn("⚠ 今：「卒業研究」のサブタスク → 入れかえ", data["child"]["notes"])
         self.assertIn("⚠ 今：「ゼミ」が終わってから → 入れかえ", data["after"]["notes"])
 
     def test_drag_into_another_category_moves_it(self):

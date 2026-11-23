@@ -132,15 +132,15 @@ class TaskForm(forms.ModelForm):
     class Meta:
         model = Task
         fields = ["title", "parent", "prerequisite", "due_at", "importance", "category", "memo"]
-        # 用語（親タスク・先にやること）ではなく、使う人が自分に問いかける形にする。
-        # アイコンは画面全体でそろえる：📁＝中の作業（親子）、🔒＝終わってから（前後）
+        # 用語（親・前後）ではなく、使う人が自分に問いかける形にする。
+        # アイコンは画面全体でそろえる：📁＝サブタスク（親子）、🔒＝終わってから（前後）
         labels = {
-            "parent": "📁 どのタスクの中の作業？",
+            "parent": "📁 どのタスクのサブタスク？",
             "prerequisite": "🔒 何が終わってから取りかかる？",
         }
         help_texts = {
-            "parent": "例：「卒業研究」の中の「文献調査」．選ぶと，そのタスクの子タスクになります．",
-            "prerequisite": "例：「文献調査」が終わってから「構成を考える」．終わるまでカードに🔒が付きます．",
+            "parent": "例：卒業研究 → 📁 文献調査",
+            "prerequisite": "例：文献調査 ┅▶ 構成を考える（終わるまで 🔒）",
         }
         field_classes = {"category": CategoryChoiceField}
         widgets = {
@@ -191,13 +191,13 @@ class TaskForm(forms.ModelForm):
         # 選べるのは options に入ったタスクだけ（ほかの番号を送られても「正しくない選択」になる）
         field.queryset = Task.objects.filter(pk__in=[task.pk for task, _ in options])
         # 親の下に子を字下げして並べる。全角スペースは、ブラウザで詰められずに残る
-        field.choices = [("", "なし（ほかのタスクの中に入れない）")] + [
+        field.choices = [("", "なし（いちばん上のタスク）")] + [
             (task.pk, "　" * (depth - 1) + ("└ " if depth > 1 else "") + task.title)
             for task, depth in options
         ]
 
         # 親を選んだときに「分類 ＝ ○○」と見せるための、親の番号 → 分類の名前（画面の JavaScript に渡す）。
-        # 子タスクの分類はいちばん上のタスクにそろっているので、親自身の分類を見ればよい
+        # サブタスクの分類はいちばん上のタスクにそろっているので、親自身の分類を見ればよい
         names = {c.pk: c.name for c in category.queryset}
         self.parent_category_names = {
             str(task.pk): names.get(task.category_id, "分類なし") for task, _ in options
