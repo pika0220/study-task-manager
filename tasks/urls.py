@@ -23,6 +23,8 @@ urlpatterns = [
     path("tasks/<int:pk>/position/", views.task_map_position, name="task_map_position"),
     path("tasks/<int:pk>/unlink/", views.task_unlink, name="task_unlink"),
     path("tasks/<int:pk>/relink/", views.task_relink, name="task_relink"),
+    # 進み具合（F-06）
+    path("progress/", views.progress, name="progress"),
     # 資料（プログラムの中の名前は source）
     path("tasks/<int:pk>/sources/new/", views.source_create, name="source_create"),
     path("sources/<int:pk>/delete/", views.source_delete, name="source_delete"),
