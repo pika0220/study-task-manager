@@ -7,143 +7,171 @@
   <!-- 見出しは画面には出さず、読み上げ（スクリーンリーダー）用に残す。下のメニューで「マップ」とわかるため -->
   <h1 class="sr-only">マップ</h1>
 
-  {% if root %}
-    <!--
-      マップの切り替え：メインタスク（親のないタスク）ごとに1枚のマップがある。
-      選ぶと、そのマップの画面（/map/番号/）へ移る（task_map.js）。
-    -->
-    <div class="mb-1 flex gap-2">
-      <label class="sr-only" for="map-select">表示するマップ</label>
-      <select id="map-select" class="select min-h-11 min-w-0 flex-1">
-        {% for item in menu %}
-          <option value="{% url 'task_map_root' item.pk %}" {% if item.pk == root.pk %}selected{% endif %}>
-            🗺️ {{ item.title }}{% if item.count %}（ほか {{ item.count }}件）{% endif %}
-          </option>
-        {% endfor %}
-      </select>
-      <!-- 新しいメインタスク（＝新しいマップ）を作る -->
-      <button type="button" class="btn btn-outline min-h-11 shrink-0" data-new-map aria-label="新しいマップを作る">＋ 新しく</button>
-    </div>
+  <!--
+    部屋の切り替え：分類ごとに1つの部屋がある。選ぶと、その部屋（/map/room/番号/）へ移る（task_map.js）。
+    （）の数は、その分類のいちばん上のタスクの数（置いてあるもの＋棚のもの）
+  -->
+  <div class="mb-1 flex gap-2">
+    <label class="sr-only" for="map-select">表示する部屋</label>
+    <select id="map-select" class="select min-h-11 min-w-0 flex-1">
+      {% for room in rooms %}
+        <option value="{% url 'task_map_room' room.key %}" {% if room.key == room_key %}selected{% endif %}>
+          🗺️ {{ room.name }}（{{ room.count }}）
+        </option>
+      {% endfor %}
+    </select>
+    <!-- 部屋＝分類。部屋を足す・名前を変えるのは、分類の管理の画面で -->
+    <a href="{% url 'category_list' %}" class="btn btn-outline btn-square min-h-11 min-w-11 shrink-0" aria-label="分類（部屋）の管理">⚙️</a>
+  </div>
 
-    <!-- 使い方は、ふだんは1行だけ見せて、押すと全部開く（マップを広く使うため） -->
-    <details class="mb-2 text-xs text-base-content/70">
-      <summary class="cursor-pointer py-1">● から別の点へ線を引くと，つながりがホームにも出ます（使い方）</summary>
-      <ul class="mt-1 list-disc space-y-1 pl-5">
-        <li>真ん中がメインタスクです．まわりに，その中の作業（子タスク・孫タスク）が広がります</li>
-        <li>点をなぞる → 動かせます（場所は保存されます）</li>
-        <li>点の右の ● から別の点へ線を引く → 📁 中に入れる・🔒 終わってからやる，を選べます</li>
-        <li>線を押す → 📁 中に入れる ⇔ 🔒 終わってからやる，の切り替えや，つながりを外すことができます</li>
-        <li>左下の「＋ タスクを足す」→ 名前・どのタスクに・つなぎ方（📁 中に入れる／🔒 終わってからやる）を選んで足せます（場所は空いているところに自動で決まります）</li>
-        <li>点を押す → 詳細画面が開きます</li>
-        <li>右下の「縮小」「拡大」で大きさを変えられます．「全体」で全部が見える大きさに戻ります</li>
-        <li>線の見方：━ 線は 📁 中の作業（親子），┅▶ 点線は 🔒 先にやること → あと</li>
-        <li>同じタスクの中で 🔒 でつないだタスクは，先にやることの先に並びます（例：卒業研究 → 文献調査 ┅▶ 考察を書く）</li>
-      </ul>
-      <!-- 点の場所を消して、自動で並べ直す。見ていた場所は覚えず、全体が見える大きさで開き直す（data-no-keep） -->
-      <form method="post" action="{% url 'task_map_arrange' root.pk %}" class="mt-2" data-no-keep
-            onsubmit="return confirm('このマップの点を，自動で並べ直しますか？（動かした場所は元に戻ります）');">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-sm btn-outline min-h-11">点を自動で並べ直す</button>
-      </form>
-    </details>
+  <!-- 使い方は、ふだんは1行だけ見せて、押すと全部開く（マップを広く使うため）。説明は記号を中心に短く -->
+  <details class="mb-2 text-xs text-base-content/70">
+    <summary class="cursor-pointer py-1">📦 棚から置く ・ ● から線を引く（使い方）</summary>
+    <ul class="mt-1 list-disc space-y-1 pl-5">
+      <li>🗺️ 部屋 ＝ 分類．📦 棚 ＝ まだ置いていないタスク</li>
+      <li>📦 → 置く：中の作業も一緒に出る ／ しまう：📦 へ戻す（タスクは消えない）</li>
+      <li>点をなぞる → 動かす</li>
+      <li>● → 別の点：📁 中に入れる ・ 🔒 終わってからやる</li>
+      <li>線を押す → 📁 ⇔ 🔒 の切り替え ・ 外す</li>
+      <li>＋ タスク → 名前・どのタスクに・つなぎ方</li>
+      <li>点を押す → 詳細</li>
+      <li>━ 📁 中の作業 ／ ┅▶ 🔒 先にやること → あと</li>
+    </ul>
+    <!-- 点の場所を消して、自動で並べ直す。見ていた場所は覚えず、全体が見える大きさで開き直す（data-no-keep） -->
+    <form method="post" action="{% url 'task_map_arrange' room_key %}" class="mt-2" data-no-keep
+          onsubmit="return confirm('この部屋の点を，自動で並べ直しますか？（動かした場所は元に戻ります）');">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline min-h-11">点を自動で並べ直す</button>
+    </form>
+  </details>
 
-    <!--
-      マップの「窓」（map-viewport）と、その中の大きな「紙」（map-canvas）。
-      map-sizer は、拡大・縮小したあとの紙の大きさ。窓は、この大きさに合わせてスクロールできる。
-      点と線は、下の map-data（タスクの一覧）をもとに task_map.js が描く。
-    -->
-    <div class="relative">
-      <div id="map-viewport" class="map-viewport rounded-box bg-base-100 shadow-sm"
-           data-position-url="{% url 'task_map_position' 0 %}" data-root-id="{{ root.pk }}">
-        <div id="map-sizer" class="map-sizer">
-          <div id="map-canvas" class="map-canvas">
-            <svg id="map-lines" class="map-lines" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <defs>
-                <!-- 🔒 の線の先につける矢印（先にやること → あとでやること） -->
-                <marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
-                </marker>
-              </defs>
-              <g id="map-edges"></g>
-              <line id="map-temp-line" class="map-temp-line" x1="0" y1="0" x2="0" y2="0"></line>
-            </svg>
-          </div>
+  <!--
+    マップの「窓」（map-viewport）と、その中の大きな「紙」（map-canvas）。
+    map-sizer は、拡大・縮小したあとの紙の大きさ。窓は、この大きさに合わせてスクロールできる。
+    点と線は、下の map-data（タスクの一覧）をもとに task_map.js が描く。
+  -->
+  <div class="relative">
+    <div id="map-viewport" class="map-viewport rounded-box bg-base-100 shadow-sm"
+         data-position-url="{% url 'task_map_position' 0 %}" data-room-key="{{ room_key }}">
+      <div id="map-sizer" class="map-sizer">
+        <div id="map-canvas" class="map-canvas">
+          <svg id="map-lines" class="map-lines" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <!-- 🔒 の線の先につける矢印（先にやること → あとでやること） -->
+              <marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+              </marker>
+            </defs>
+            <g id="map-edges"></g>
+            <line id="map-temp-line" class="map-temp-line" x1="0" y1="0" x2="0" y2="0"></line>
+          </svg>
         </div>
       </div>
-      {% if nodes|length == 1 %}
-        <!-- まだメインタスクしかないマップでは、最初にすることを案内する -->
-        <p class="pointer-events-none absolute inset-x-4 top-4 rounded-box bg-base-200/90 p-2 text-center text-sm">
-          左下の「＋ タスクを足す」から，「{{ root.title }}」の中の作業を足せます．
-        </p>
-      {% endif %}
-      <!--
-        タスクを足すボタン（窓の左下に重ねる）。何もないところを押して足す形だと、
-        スマホでは押しまちがえて足してしまいやすいので、ボタンを押したときだけ足す
-      -->
-      <button type="button" class="btn btn-primary absolute bottom-2 left-2 min-h-11 shadow-sm" data-add-task>＋ タスクを足す</button>
-      <!-- 拡大・縮小のボタン（窓の右下に重ねる） -->
-      <div class="join absolute bottom-2 right-2 shadow-sm">
-        <button type="button" class="btn join-item btn-sm min-h-11" data-zoom="out">縮小</button>
-        <button type="button" class="btn join-item btn-sm min-h-11" data-zoom="fit">全体</button>
-        <button type="button" class="btn join-item btn-sm min-h-11" data-zoom="in">拡大</button>
-      </div>
     </div>
-
-    <p class="mt-1 text-xs text-error" id="map-status" role="status"></p>
-
-    <!-- タスクの一覧を JavaScript に渡す。json_script は < などを安全な形にして埋めこむ -->
-    {{ nodes|json_script:"map-data" }}
-  {% else %}
-    <!-- まだタスクが1つもないとき -->
-    <div class="card bg-base-100 shadow-sm">
-      <div class="card-body items-center text-center">
-        <p class="font-bold">まだマップがありません</p>
-        <p class="text-sm text-base-content/60">真ん中に置くメインタスク（例：卒業研究）を決めて，新しいマップを作りましょう．</p>
-        <button type="button" class="btn btn-primary btn-sm mt-2" data-new-map>＋ 新しいマップを作る</button>
-      </div>
+    {% if not nodes %}
+      <!-- まだ何も置いていない部屋：最初にできることを記号で示す -->
+      <p class="pointer-events-none absolute inset-x-4 top-4 rounded-box bg-base-200/90 p-2 text-center text-sm">
+        🗺️ {{ room_name }}：{% if shelf %}📦 棚から置く ・ {% endif %}＋ タスクを足す
+      </p>
+    {% endif %}
+    <!--
+      左下：タスクを足す・棚を開く。何もないところを押して足す形だと、
+      スマホでは押しまちがえて足してしまいやすいので、ボタンを押したときだけ足す
+    -->
+    <div class="absolute bottom-2 left-2 flex gap-2">
+      <button type="button" class="btn btn-primary min-h-11 shadow-sm" data-add-task>＋ タスク</button>
+      <button type="button" class="btn min-h-11 shadow-sm" data-open-shelf aria-label="棚を開く（まだ置いていないタスク {{ shelf|length }}件）">📦 {{ shelf|length }}</button>
     </div>
-  {% endif %}
+    <!-- 拡大・縮小のボタン（窓の右下に重ねる） -->
+    <div class="join absolute bottom-2 right-2 shadow-sm">
+      <button type="button" class="btn join-item btn-sm min-h-11" data-zoom="out">縮小</button>
+      <button type="button" class="btn join-item btn-sm min-h-11" data-zoom="fit">全体</button>
+      <button type="button" class="btn join-item btn-sm min-h-11" data-zoom="in">拡大</button>
+    </div>
+  </div>
 
-  <!-- タスクを足す画面。「＋ タスクを足す」と「＋ 新しく」（新しいマップ）で使う -->
-  <dialog id="map-add-dialog" class="modal modal-bottom sm:modal-middle"
-          data-root-id="{{ root.pk|default:'' }}" data-root-title="{{ root.title|default:'' }}">
+  <p class="mt-1 text-xs text-error" id="map-status" role="status"></p>
+
+  <!-- タスクの一覧を JavaScript に渡す。json_script は < などを安全な形にして埋めこむ -->
+  {{ nodes|json_script:"map-data" }}
+
+  <!-- 棚：この部屋（分類）のいちばん上のタスクのうち、まだ置いていないもの・置いてあるもの -->
+  <dialog id="map-shelf-dialog" class="modal modal-bottom sm:modal-middle">
     <div class="modal-box">
-      <h3 class="text-lg font-bold" data-add-heading>タスクを足す</h3>
+      <h3 class="text-lg font-bold">📦 棚（{{ room_name }}）</h3>
+      {% if shelf %}
+        <ul class="mt-3 flex flex-col">
+          {% for task in shelf %}
+            <li class="flex min-h-12 items-center justify-between gap-2 border-b border-base-200">
+              <span class="min-w-0 truncate">{{ task.title }}</span>
+              <form method="post" action="{% url 'task_map_place' task.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary btn-sm min-h-11">🗺️ 置く</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="mt-3 text-sm text-base-content/60">📦 空（ぜんぶ置いてあります）</p>
+      {% endif %}
+      {% if placed %}
+        <p class="mt-4 text-sm font-bold">🗺️ 置いてある</p>
+        <ul class="mt-1 flex flex-col">
+          {% for task in placed %}
+            <li class="flex min-h-12 items-center justify-between gap-2 border-b border-base-200">
+              <span class="min-w-0 truncate">{{ task.title }}</span>
+              <form method="post" action="{% url 'task_map_stow' task.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-ghost btn-sm min-h-11">📦 しまう</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <form method="dialog" class="mt-3">
+        <button class="btn btn-ghost btn-block">閉じる</button>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button aria-label="閉じる">close</button></form>
+  </dialog>
+
+  <!-- タスクを足す画面 -->
+  <dialog id="map-add-dialog" class="modal modal-bottom sm:modal-middle">
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">🗺️ {{ room_name }} にタスクを足す</h3>
       <form method="post" action="{% url 'task_map_create' %}" class="mt-4">
         {% csrf_token %}
+        <input type="hidden" name="room" value="{{ room_key }}">
         <label class="floating-label">
           <span>タスクの名前</span>
           <input type="text" name="title" maxlength="200" required class="input input-lg w-full" placeholder="例：レポートの構成を考える">
         </label>
-        {% if root %}
-          <!-- どのタスクに・どうつなぐか。新しいマップを作るときは、まとめて隠す（task_map.js） -->
-          <div data-anchor-field>
-            <label class="mt-3 block">
-              <span class="text-sm font-bold">どのタスクに？</span>
-              <select name="anchor" class="select mt-1 w-full min-h-11">
-                {% for choice in parent_choices %}
-                  <!-- data-level・data-root：選べないつなぎ方を押せなくするのに使う -->
-                  <option value="{{ choice.pk }}" data-level="{{ choice.level }}" data-root="{{ choice.is_root|yesno:'1,0' }}" {% if forloop.first %}selected{% endif %}>{{ choice.label }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <fieldset class="mt-3">
-              <legend class="text-sm font-bold">つなぎ方</legend>
-              <label class="mt-1 flex min-h-11 cursor-pointer items-center gap-2">
-                <input type="radio" name="relation" value="child" class="radio radio-primary" checked>
-                <span>📁 その中に入れる（中の作業）</span>
-              </label>
-              <label class="flex min-h-11 cursor-pointer items-center gap-2">
-                <input type="radio" name="relation" value="after" class="radio radio-primary">
-                <span>🔒 それが終わってからやる</span>
-              </label>
-              <p class="text-xs text-base-content/60" data-relation-note></p>
-            </fieldset>
-          </div>
-        {% endif %}
+        <label class="mt-3 block">
+          <span class="text-sm font-bold">どのタスクに？</span>
+          <select name="anchor" class="select mt-1 w-full min-h-11">
+            <!-- 何にもつながない：この部屋の、いちばん上のタスクとして置く -->
+            <option value="" data-level="0" selected>（つながない：いちばん上に置く）</option>
+            {% for choice in anchors %}
+              <!-- data-level：3段目のタスクの「中」には入れられないことを、画面で示すのに使う -->
+              <option value="{{ choice.pk }}" data-level="{{ choice.level }}">{{ choice.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <fieldset class="mt-3" data-relation-field hidden>
+          <legend class="text-sm font-bold">つなぎ方</legend>
+          <label class="mt-1 flex min-h-11 cursor-pointer items-center gap-2">
+            <input type="radio" name="relation" value="child" class="radio radio-primary" checked>
+            <span>📁 その中に入れる（中の作業）</span>
+          </label>
+          <label class="flex min-h-11 cursor-pointer items-center gap-2">
+            <input type="radio" name="relation" value="after" class="radio radio-primary">
+            <span>🔒 それが終わってからやる</span>
+          </label>
+          <p class="text-xs text-base-content/60" data-relation-note></p>
+        </fieldset>
         <button type="submit" class="btn btn-primary btn-block mt-3 min-h-12">追加する</button>
       </form>
-      <p class="mt-2 text-xs text-base-content/60">締切や重要度は，あとで点を押して詳細画面から入れられます．</p>
+      <p class="mt-2 text-xs text-base-content/60">締切・重要度 → あとで点を押して詳細から</p>
       <form method="dialog" class="mt-2">
         <button class="btn btn-ghost btn-block">やめる</button>
       </form>
@@ -208,11 +236,13 @@
     .map-node.importance-2 { border-left-color: var(--color-warning); }
     .map-node.is-locked { opacity: 0.75; }
     .map-node.is-done { opacity: 0.5; text-decoration: line-through; }
-    /* 真ん中のメインタスク：色を付けて、ほかの点より目立たせる */
-    .map-node.is-root {
-      padding: 0.75rem; text-align: center; font-size: 0.9375rem;
-      border: 2px solid var(--color-primary); background: var(--color-primary); color: var(--color-primary-content);
+    /* いちばん上のタスク：ふちを太くして、木の始まりだとわかるようにする */
+    .map-node.is-top {
+      border-width: 2px 2px 2px 6px; font-size: 0.875rem;
+      border-top-color: var(--color-primary); border-right-color: var(--color-primary); border-bottom-color: var(--color-primary);
     }
+    /* 置いた・足したばかりのタスク：少しの間、まわりを光らせる */
+    .map-node.is-focus { box-shadow: 0 0 0 4px var(--color-accent); transition: box-shadow 0.3s; }
     .map-node.is-moving { cursor: grabbing; box-shadow: 0 8px 20px rgb(0 0 0 / 0.25); z-index: 2; }
     /* 線を引くための ● 。見た目は小さく、押せる範囲は ::after で広げる */
     .map-handle {

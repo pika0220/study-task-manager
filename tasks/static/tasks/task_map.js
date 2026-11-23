@@ -1,13 +1,13 @@
-// マインドマップ（Issue #30）。メインタスクを真ん中に、その中の作業（子タスク・孫タスク）をまわりに描く。
+// マインドマップ（Issue #30・#36）。分類ごとの「部屋」に、棚から選んだタスクを置き、つながりを線で描く。
 //
 // できること：
-//   - 上のメニュー            → 別のメインタスクのマップに切り替える
-//   - 「＋ 新しく」            → 名前だけで新しいメインタスク（新しいマップ）を作る
+//   - 上のメニュー            → 別の部屋（分類）に切り替える
+//   - 📦                      → 棚を開く（置く・しまう）
 //   - 点を押す                → そのタスクの詳細画面へ
 //   - 点をなぞる              → 点を動かす（離したら置き場所をサーバーに保存）
 //   - 点の右の ● から別の点へ → 線を引いて「つなぎ方」を選ぶ（ホームのドラッグと同じ画面・同じルール）
 //   - 線を押す                → つなぎ方を切り替える（📁 ⇔ 🔒）か、つながりを外す
-//   - 「＋ タスクを足す」      → 名前・どのタスクに・つなぎ方を選んで足す（場所はサーバーが空いているところに決める）
+//   - ＋ タスク               → 名前・どのタスクに・つなぎ方を選んで足す（場所はサーバーが空いているところに決める）
 //   - 何もないところをなぞる  → ふつうのスクロールでマップを動かす
 //   - 縮小・全体・拡大        → 小さくする・全部が見える大きさ・大きくする
 (() => {
@@ -16,55 +16,44 @@
   const MAX_DEPTH = 3; // 入れ子は3段まで（モデルの Task.MAX_DEPTH と同じ）
 
   // ---- タスクを足す画面 ----
-  const anchorField = addDialog.querySelector("[data-anchor-field]");
-  const anchorSelect = anchorField ? anchorField.querySelector('select[name="anchor"]') : null;
-  const relationNote = anchorField ? anchorField.querySelector("[data-relation-note]") : null;
+  const anchorSelect = addForm.querySelector('select[name="anchor"]');
+  const relationField = addForm.querySelector("[data-relation-field]");
+  const relationNote = addForm.querySelector("[data-relation-note]");
   const radio = (value) => addForm.querySelector(`input[name="relation"][value="${value}"]`);
 
-  // 選んだタスクに合わせて、選べないつなぎ方を押せなくする（最後のチェックはサーバーがする）
+  // 選んだタスクに合わせて、つなぎ方の欄を見せる・押せなくする（最後のチェックはサーバーがする）
+  //   - 「つながない」なら、つなぎ方は聞かない（いちばん上に置く）
   //   - 3段目のタスクの「中」には入れられない（入れ子は3段まで）
-  //   - 真ん中のメインタスクの「あと」には置けない（となりがないので、別のマップになってしまう）
   const updateRelations = () => {
-    if (!anchorSelect) return;
     const option = anchorSelect.selectedOptions[0];
-    const childOk = Number(option.dataset.level) < MAX_DEPTH;
-    const afterOk = option.dataset.root !== "1";
+    const level = Number(option.dataset.level);
+    relationField.hidden = level === 0;
+    const childOk = level < MAX_DEPTH;
     radio("child").disabled = !childOk;
-    radio("after").disabled = !afterOk;
     if (!childOk) radio("after").checked = true;
-    if (!afterOk) radio("child").checked = true;
-    relationNote.textContent = !childOk
-      ? "3段目のタスクの中には入れられないので，「終わってからやる」になります．"
-      : !afterOk
-        ? "真ん中のメインタスクには「中に入れる」でつなぎます．"
-        : "";
+    relationNote.textContent = childOk ? "" : "3段目 → 📁 は不可（🔒 でつなぐ）";
   };
-  if (anchorSelect) anchorSelect.addEventListener("change", updateRelations);
+  anchorSelect.addEventListener("change", updateRelations);
 
-  // 名前だけでタスクを足す画面を開く。inMap が true ならこのマップに足す、false なら新しいマップを作る
-  const openAdd = (inMap) => {
-    addForm.reset(); // 前に入れかけた名前を消し、つなぐ先を真ん中のメインタスクに戻す
-    if (anchorField) {
-      // 新しいマップのときは「どのタスクに・つなぎ方」を隠す。disabled の欄は送られないので、親なしのタスクになる
-      anchorField.hidden = !inMap;
-      anchorField.querySelectorAll("select, input").forEach((el) => (el.disabled = !inMap));
-      if (inMap) updateRelations();
-    }
-    addDialog.querySelector("[data-add-heading]").textContent = inMap
-      ? `「${addDialog.dataset.rootTitle}」のマップにタスクを足す`
-      : "新しいマップを作る";
+  const openAdd = () => {
+    addForm.reset(); // 前に入れかけた名前を消し、「つながない」に戻す
+    updateRelations();
     addDialog.showModal();
     addForm.querySelector('input[name="title"]').focus();
   };
-  document.querySelectorAll("[data-new-map]").forEach((button) => button.addEventListener("click", () => openAdd(false)));
-  document.querySelectorAll("[data-add-task]").forEach((button) => button.addEventListener("click", () => openAdd(true)));
+  document.querySelectorAll("[data-add-task]").forEach((button) => button.addEventListener("click", openAdd));
 
-  // マップの切り替え：選んだマップの画面へ移る
+  // ---- 棚 ----
+  const shelfDialog = document.getElementById("map-shelf-dialog");
+  document.querySelectorAll("[data-open-shelf]").forEach((button) =>
+    button.addEventListener("click", () => shelfDialog.showModal()),
+  );
+
+  // 部屋の切り替え：選んだ部屋の画面へ移る
   const select = document.getElementById("map-select");
   if (select) select.addEventListener("change", () => (window.location.href = select.value));
 
   const viewport = document.getElementById("map-viewport");
-  if (!viewport) return; // まだマップがない画面
   const sizer = document.getElementById("map-sizer");
   const canvas = document.getElementById("map-canvas");
   const svg = document.getElementById("map-lines");
@@ -73,7 +62,7 @@
   const status = document.getElementById("map-status");
   const unlinkDialog = document.getElementById("map-unlink-dialog");
   const nodes = JSON.parse(document.getElementById("map-data").textContent);
-  const rootId = Number(viewport.dataset.rootId);
+  const roomKey = viewport.dataset.roomKey; // この部屋の名前（分類の番号、分類なしは none）
   const positionUrlTemplate = viewport.dataset.positionUrl; // 例：/tasks/0/position/
   const unlinkUrlTemplate = unlinkDialog.dataset.unlinkUrl; // 例：/tasks/0/unlink/
   const relinkUrlTemplate = unlinkDialog.dataset.relinkUrl; // 例：/tasks/0/relink/
@@ -87,6 +76,7 @@
   const MARGIN = 400; // 紙の右と下に残しておく余白
   const MIN_SCALE = 0.4; // いちばん小さくしたときの倍率
   const MAX_SCALE = 1.6; // いちばん大きくしたときの倍率
+  const BUTTONS_HEIGHT = 60; // 窓の下に重なっているボタン（＋ タスク・縮小など）の高さ。点がその下に隠れないように空ける
   const clamp = (value) => Math.min(Math.max(value, 0), LIMIT);
   let scale = 1; // 今の倍率（1 ＝ そのままの大きさ）
 
@@ -97,7 +87,7 @@
     el.className = [
       "map-node",
       `importance-${node.importance}`,
-      node.root ? "is-root" : "",
+      node.top ? "is-top" : "",
       node.locked ? "is-locked" : "",
       node.done ? "is-done" : "",
     ].join(" ");
@@ -107,13 +97,10 @@
     // textContent：タスク名を「文字」として入れる（HTMLとして読まれないので安全）
     title.textContent = node.locked ? `🔒 ${node.title}` : node.title;
     el.append(title);
-    // 真ん中のメインタスクからは線を引かない（自分の中の作業とは、親子・前後のどちらにもつなげないため）
-    if (!node.root) {
-      const handle = document.createElement("span");
-      handle.className = "map-handle";
-      handle.title = "ここから別の点へ線を引く";
-      el.append(handle);
-    }
+    const handle = document.createElement("span");
+    handle.className = "map-handle";
+    handle.title = "ここから別の点へ線を引く";
+    el.append(handle);
     canvas.appendChild(el);
     node.el = el;
     byId.set(node.id, node);
@@ -168,14 +155,14 @@
     (viewport.scrollLeft + viewport.clientWidth / 2) / scale,
     (viewport.scrollTop + viewport.clientHeight / 2) / scale,
   ];
-  // 全部の点が窓に入る倍率にして、真ん中に見せる
-  const fitAll = () => {
-    const left = Math.min(...nodes.map((n) => n.x));
-    const top = Math.min(...nodes.map((n) => n.y));
-    const right = Math.max(...nodes.map((n) => n.x + n.w));
-    const bottom = Math.max(...nodes.map((n) => n.y + n.h));
+  // 渡した点（list）が全部窓に入る倍率にして、真ん中に見せる
+  const fitNodes = (list) => {
+    const left = Math.min(...list.map((n) => n.x));
+    const top = Math.min(...list.map((n) => n.y));
+    const right = Math.max(...list.map((n) => n.x + n.w));
+    const bottom = Math.max(...list.map((n) => n.y + n.h));
     const padding = 40;
-    const buttons = 60; // 窓の下に重なっているボタン（＋ タスクを足す・縮小など）の高さ。点がその下に隠れないように空ける
+    const buttons = BUTTONS_HEIGHT;
     const fit = Math.min(
       viewport.clientWidth / (right - left + padding * 2),
       (viewport.clientHeight - buttons) / (bottom - top + padding * 2),
@@ -183,6 +170,14 @@
     );
     // ボタンの分だけ、見せる場所を下にずらす（＝点が少し上に寄る）
     setScale(fit, (left + right) / 2, (top + bottom) / 2 + buttons / 2 / Math.max(fit, MIN_SCALE));
+  };
+  const fitAll = () => {
+    if (!nodes.length) {
+      // まだ何も置いていない部屋：最初の点が置かれる、紙の真ん中あたりを見せる（サーバーの MAP_CENTER）
+      setScale(1, 800, 800);
+      return;
+    }
+    fitNodes(nodes);
   };
   document.querySelectorAll("[data-zoom]").forEach((button) =>
     button.addEventListener("click", () => {
@@ -392,17 +387,13 @@
     unlinkDialog.querySelector("[data-relink-label]").textContent = isChild
       ? `🔒 「${to.title}」が終わってからやる，に切り替える`
       : `📁 「${to.title}」の中に入れる，に切り替える`;
-    // 真ん中のメインタスクとは前後にできない（となりがないので、別のマップになってしまう）
-    const blocked = isChild && to.root;
-    relinkButton.disabled = blocked;
-    unlinkDialog.querySelector("[data-relink-reason]").textContent = blocked
-      ? "真ん中のメインタスクとは，「終わってからやる」のつながりにできません．"
-      : "";
+    relinkButton.disabled = false;
+    unlinkDialog.querySelector("[data-relink-reason]").textContent = "";
 
     unlinkDialog.querySelector("[data-unlink-button]").formAction = urlFor(unlinkUrlTemplate, from.id);
     const parent = byId.get(from.parent);
     unlinkDialog.querySelector("[data-unlink-note]").textContent = isChild
-      ? `どちらを選んでもタスクは消えません．外した「${from.title}」は，別のマップ（メインタスク）になります．`
+      ? `どちらを選んでもタスクは消えません．外すと，「${from.title}」はこの部屋のいちばん上のタスクになります．`
       : from.chained && parent
         ? `どちらを選んでもタスクは消えません．外すと，「${from.title}」は「${parent.title}」の中の作業として線でつながります．`
         : "どちらを選んでもタスクは消えません．";
@@ -411,7 +402,7 @@
 
   // ---- 画面を読みこみ直しても、見ていた場所と大きさに戻す ----
   // つないだ・外した・足したあとは画面が読みこみ直されるので、その前に覚えておく（マップごとに別々）
-  const VIEW_KEY = `task-map-view-${rootId}`;
+  const VIEW_KEY = `task-map-view-${roomKey}`;
   document.addEventListener(
     "submit",
     (event) => {
@@ -435,9 +426,68 @@
   } catch (error) {
     saved = null;
   }
+  // 点が窓の中に見えているか（list のどれか1つでも見えていれば true）
+  const anyVisible = (list) => {
+    const [cx, cy] = viewCenter();
+    const halfW = viewport.clientWidth / scale / 2;
+    const halfH = viewport.clientHeight / scale / 2;
+    return list.some(
+      (n) => n.x + n.w > cx - halfW && n.x < cx + halfW && n.y + n.h > cy - halfH && n.y < cy + halfH,
+    );
+  };
+  // 点（list）が全部見えるところまで、今の大きさのまま、なめらかにスクロールする。
+  // 動く量はいちばん少なくする（下に置いた木なら、今見ていた木が上に少し残る）。
+  // 今の大きさでは窓に入りきらないときだけ、入る大きさに縮める
+  const showNodes = (list) => {
+    const pad = 24; // 窓のふちとの間のすきま（画面の px）
+    const left = Math.min(...list.map((n) => n.x)) * scale - pad;
+    const top = Math.min(...list.map((n) => n.y)) * scale - pad;
+    const right = Math.max(...list.map((n) => n.x + n.w)) * scale + pad;
+    const bottom = Math.max(...list.map((n) => n.y + n.h)) * scale + pad;
+    const width = viewport.clientWidth;
+    const height = viewport.clientHeight - BUTTONS_HEIGHT; // 下のボタンに隠れる分は数えない
+    if (right - left > width || bottom - top > height) {
+      fitNodes(list);
+      return;
+    }
+    // 今のスクロールの位置を、「list が全部見える範囲」におさめる
+    const fit = (current, low, high, size) => Math.min(Math.max(current, high - size), low);
+    viewport.scrollTo({
+      left: fit(viewport.scrollLeft, left, right, width),
+      top: fit(viewport.scrollTop, top, bottom, height),
+      behavior: "smooth", // 一瞬で飛ばずに動くので、どこへ動いたかがわかる
+    });
+  };
   if (saved && Number.isFinite(saved.scale)) {
     setScale(saved.scale, saved.x, saved.y);
+    // 覚えていた場所に、点が1つも見えないとき（何もない部屋で覚えた場所など）は、全体を見せる
+    if (nodes.length && !anyVisible(nodes)) fitAll();
   } else {
     fitAll(); // 初めて開いたときは、全部が見える大きさで見せる
+  }
+
+  // ---- 置いた・足したタスクを見せる（?focus=番号）----
+  // 棚から置いた木や、新しく足したタスクは、今見ている場所の外（下など）にあることがある。
+  // その木（そのタスクと中の作業）が窓に入るまでスクロールし、少しの間ふちを光らせる
+  const params = new URLSearchParams(window.location.search);
+  const focused = byId.get(Number(params.get("focus")));
+  if (params.has("focus")) {
+    // 読みこみ直したときに、もう一度動かないように、URL から ?focus= を消しておく
+    params.delete("focus");
+    const rest = params.toString();
+    history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash);
+  }
+  if (focused) {
+    // 木のいちばん上まで、親をたどる
+    const rootOf = (node) => {
+      let current = node;
+      while (current.parent && byId.has(current.parent)) current = byId.get(current.parent);
+      return current;
+    };
+    // 棚から置いた木（いちばん上のタスク）は木ごと、中に足したタスクはその点だけを見せる
+    const target = focused.top ? nodes.filter((n) => rootOf(n) === focused) : [focused];
+    showNodes(target);
+    focused.el.classList.add("is-focus");
+    window.setTimeout(() => focused.el.classList.remove("is-focus"), 2500);
   }
 })();

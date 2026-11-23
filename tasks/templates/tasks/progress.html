@@ -73,9 +73,9 @@
       {% endfor %}
     </div>
 
-    <!-- メインタスクごと：中の作業があるメインタスク。🗺 でそのマップへ -->
+    <!-- 中の作業があるタスクごと（いちばん上のタスク）。🗺 でそのタスクがいる部屋へ -->
     {% if main_tasks %}
-      <h2 class="mb-2 font-bold">メインタスク</h2>
+      <h2 class="mb-2 font-bold">📁 中の作業があるタスク</h2>
       <div class="flex flex-col gap-2">
         {% for item in main_tasks %}
           <div class="card bg-base-100 shadow-sm">
@@ -85,7 +85,7 @@
                 <span class="flex shrink-0 items-center text-sm">
                   {% if item.overdue %}<span class="badge badge-error badge-sm me-1">⚠ {{ item.overdue }}</span>{% endif %}
                   <span class="font-bold">{{ item.done }}</span><span class="text-base-content/60">&nbsp;/ {{ item.total }}</span>
-                  <!-- 🗺️：このメインタスクのマップを開く -->
+                  <!-- 🗺️：このタスクがいる部屋（マップ）を開く -->
                   <a href="{% url 'task_map_root' item.task.pk %}" class="btn btn-ghost btn-square ms-1 min-h-11 min-w-11 text-xl" aria-label="「{{ item.task.title }}」のマップを開く">🗺️</a>
                 </span>
               </div>
