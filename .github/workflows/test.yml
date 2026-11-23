@@ -23,6 +23,17 @@ jobs:
       - name: 設定に問題がないか確かめる
         run: uv run python manage.py check
 
+      # 本番（DJANGO_DEBUG=0）の設定で、Django の公開前の点検をする（Issue #45）。
+      # 鍵は、毎回その場で作るランダムな文字列（本物の鍵は GitHub に置かない）。
+      # --fail-level WARNING：警告が1つでもあれば失敗にする
+      - name: 本番の設定を点検する（check --deploy）
+        env:
+          DJANGO_DEBUG: "0"
+          DJANGO_ALLOWED_HOSTS: example.com
+        run: |
+          export DJANGO_SECRET_KEY="$(uv run python -c 'import secrets; print(secrets.token_urlsafe(50))')"
+          uv run python manage.py check --deploy --fail-level WARNING
+
       - name: マイグレーションの作り忘れがないか確かめる
         run: uv run python manage.py makemigrations --check --dry-run
 
