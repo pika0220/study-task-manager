@@ -29,6 +29,13 @@
       </button>
       <p class="-mt-1 text-xs text-error" data-reason="after"></p>
       <ul class="-mt-1 text-xs text-warning-content/80" data-note="after"></ul>
+
+      <!-- 🔗 関連（Issue #43）：順番なし・いくつでも。どちらから引いても同じつながりになる -->
+      <button type="submit" name="relation" value="related" class="btn btn-block min-h-12 justify-start">
+        <span>🔗 「<span data-target-title></span>」と関連（順番なし）</span>
+      </button>
+      <p class="-mt-1 text-xs text-error" data-reason="related"></p>
+      <ul class="-mt-1 text-xs text-warning-content/80" data-note="related"></ul>
     </form>
     <form method="dialog" class="mt-2">
       <!-- method="dialog"：送らずに画面を閉じるだけ。何も変わらない -->

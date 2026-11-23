@@ -31,11 +31,11 @@
       <li>🗺️ 部屋 ＝ 分類．📦 棚 ＝ まだ置いていないタスク</li>
       <li>📦 → 置く：サブタスクも一緒に出る ／ しまう：📦 へ戻す（タスクは消えない）</li>
       <li>点をなぞる → 動かす</li>
-      <li>● → 別の点：📁 サブタスクにする ・ 🔒 終わってからやる</li>
+      <li>● → 別の点：📁 サブタスクにする ・ 🔒 終わってからやる ・ 🔗 関連</li>
       <li>線を押す → 📁 ⇔ 🔒 の切り替え ・ 外す</li>
       <li>＋ タスク → 名前・どのタスクに・つなぎ方</li>
       <li>点を押す → 詳細</li>
-      <li>━ 📁 サブタスク ／ ┅▶ 🔒 先にやること → あと</li>
+      <li>━ 📁 サブタスク ／ ┅▶ 🔒 先にやること → あと ／ ⋯ 🔗 関連（順番なし）</li>
     </ul>
     <!-- 点の場所を消して、自動で並べ直す。見ていた場所は覚えず、全体が見える大きさで開き直す（data-no-keep） -->
     <form method="post" action="{% url 'task_map_arrange' room_key %}" class="mt-2" data-no-keep
@@ -188,6 +188,7 @@
       <form method="post" class="mt-4 flex flex-col gap-2">
         {% csrf_token %}
         <input type="hidden" name="relation" value="">
+        <input type="hidden" name="target" value="">
         <input type="hidden" name="next" value="{{ request.get_full_path }}">
         <!-- formaction：押したボタンによって、送り先（切り替える・外す）を変える。中身は task_map.js が入れる -->
         <button type="submit" class="btn btn-block min-h-12 justify-start" data-relink-button><span data-relink-label></span></button>
@@ -218,6 +219,8 @@
     .map-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; color: var(--color-base-content); }
     .map-edge-line { stroke: color-mix(in oklab, var(--color-base-content) 55%, transparent); stroke-width: 2.5; fill: none; }
     .map-edge-line.is-after { stroke-dasharray: 6 5; stroke-width: 2; }
+    /* 🔗 関連：細かい点線（📁 の実線・🔒 の破線と見分けられるように） */
+    .map-edge-line.is-related { stroke-dasharray: 1 6; stroke-linecap: round; stroke-width: 3; }
     /* 線の上の、押しやすい太い透明な線（見えないが、押せる） */
     .map-edge-hit { stroke: transparent; stroke-width: 22; fill: none; pointer-events: stroke; cursor: pointer; }
     .map-edge:hover .map-edge-line { stroke: var(--color-error); }
