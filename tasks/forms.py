@@ -196,6 +196,13 @@ class TaskForm(forms.ModelForm):
             for task, depth in options
         ]
 
+        # 親を選んだときに「分類 ＝ ○○」と見せるための、親の番号 → 分類の名前（画面の JavaScript に渡す）。
+        # 子タスクの分類はいちばん上のタスクにそろっているので、親自身の分類を見ればよい
+        names = {c.pk: c.name for c in category.queryset}
+        self.parent_category_names = {
+            str(task.pk): names.get(task.category_id, "分類なし") for task, _ in options
+        }
+
         # 先にやること：同じように、選べるタスクだけに絞る
         pre_options = prerequisite_options(user, editing=self.instance)
         pre = self.fields["prerequisite"]
@@ -215,6 +222,11 @@ class TaskForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("parent"):
+            # 親を選んだときは、分類は親（いちばん上のタスク）と同じになる（モデルの save() がそろえる）。
+            # 分類の欄は画面で隠れているので、送られてきた値は使わない
+            cleaned["category"] = None
+            return cleaned
         if cleaned.get("category") == NEW_CATEGORY:
             name = (cleaned.get("new_category_name") or "").strip()
             if not name:

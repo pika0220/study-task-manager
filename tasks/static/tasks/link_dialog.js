@@ -12,8 +12,17 @@ window.TaskLink = (() => {
   const setChoice = (relation, info) => {
     const button = dialog.querySelector(`button[value="${relation}"]`);
     const reason = dialog.querySelector(`[data-reason="${relation}"]`);
+    const notes = dialog.querySelector(`[data-note="${relation}"]`);
     button.disabled = !info.ok;
     reason.textContent = info.ok ? "" : info.reason;
+    // 変わること（分類・入れかえ）を1行ずつ出す。textContent なので、タスク名は文字として入る
+    notes.replaceChildren(
+      ...(info.notes || []).map((text) => {
+        const li = document.createElement("li");
+        li.textContent = text;
+        return li;
+      }),
+    );
   };
 
   const open = async (from, to) => {

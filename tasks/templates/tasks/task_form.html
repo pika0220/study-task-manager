@@ -33,7 +33,15 @@
 
         {% for field in form.detail_fields %}
           {% include "partials/form_field.html" with field=field %}
+          {% if field.name == "category" %}
+            <!-- 親を選んだときは、分類の欄のかわりにこれを見せる（分類は親と同じになるため） -->
+            <fieldset class="fieldset" id="category-follows-parent" hidden>
+              <legend class="fieldset-legend">分類</legend>
+              <p class="text-sm">📁 ＝ 親と同じ：<span class="badge badge-outline" data-parent-category></span></p>
+            </fieldset>
+          {% endif %}
         {% endfor %}
+        {{ form.parent_category_names|json_script:"parent-categories" }}
         <div class="mt-4 flex gap-2">
           <a href="{{ cancel_url }}" class="btn flex-1">やめる</a>
           <button type="submit" class="btn btn-primary flex-1">{{ submit_label }}</button>
@@ -43,19 +51,32 @@
   </div>
 
   <script>
-    // 分類で「＋ 新しい分類…」を選んだときだけ、名前を書く欄を見せる。
-    // JavaScriptが動かない環境では、欄はずっと見えたまま（それでも登録はできる）
+    // 分類の欄の見せ方。JavaScriptが動かない環境では、欄はずっと見えたまま（それでも登録はできる）
+    //   - 「＋ 新しい分類…」を選んだときだけ、名前を書く欄を見せる
+    //   - 親（📁 どのタスクの中の作業？）を選んだら、分類の欄を隠して「📁 ＝ 親と同じ：○○」を見せる
     (() => {
       const select = document.querySelector('select[name="category"]');
       const box = document.getElementById("field-new_category_name");
+      const parent = document.querySelector('select[name="parent"]');
+      const categoryField = document.getElementById("field-category");
+      const follows = document.getElementById("category-follows-parent");
+      const dataTag = document.getElementById("parent-categories");
+      const parentCategories = dataTag ? JSON.parse(dataTag.textContent) : {};
       if (!select || !box) return;
-      const update = () => {
+      const update = (focus) => {
+        const hasParent = parent && parent.value !== "";
         const isNew = select.value === "__new__";
-        box.hidden = !isNew;
-        if (isNew) box.querySelector("input").focus();
+        categoryField.hidden = hasParent;
+        box.hidden = hasParent || !isNew;
+        if (follows) {
+          follows.hidden = !hasParent;
+          if (hasParent) follows.querySelector("[data-parent-category]").textContent = parentCategories[parent.value] || "分類なし";
+        }
+        if (focus && isNew && !hasParent) box.querySelector("input").focus();
       };
-      select.addEventListener("change", update);
-      box.hidden = select.value !== "__new__";
+      select.addEventListener("change", () => update(true));
+      if (parent) parent.addEventListener("change", () => update(false));
+      update(false);
     })();
   </script>
 {% endblock %}

@@ -1297,7 +1297,7 @@ class MindMapTests(TestCase):
     def test_unlink_parent_makes_a_new_map(self):
         response = self.unlink(self.reading, "child", next=self.map_url())
         self.assertRedirects(response, self.map_url())
-        self.assertContains(response, "「文献調査」は別のマップになります．")
+        self.assertContains(response, "「文献調査」は別のマップになります（分類なし）．")
         self.reading.refresh_from_db()
         self.assertIsNone(self.reading.parent)
         self.assertTrue(Task.objects.filter(pk=self.study.pk).exists())  # 相手のタスクは消えない
@@ -1427,6 +1427,114 @@ class ProgressTests(TestCase):
         with CaptureQueriesContext(connection) as many:
             self.get()
         self.assertEqual(len(few), len(many))
+
+
+class CategoryFollowsTopTests(TestCase):
+    """分類は、いちばん上のタスクにそろう（Issue #34）。"""
+
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        cats = {c.name: c for c in self.me.categories.all()}
+        self.lesson, self.research = cats["授業"], cats["研究"]
+        self.study = Task.objects.create(owner=self.me, title="卒業研究", category=self.research)
+        self.report = Task.objects.create(owner=self.me, title="レポート", category=self.lesson)
+        self.client.force_login(self.me)
+
+    def refresh(self, *tasks):
+        for task in tasks:
+            task.refresh_from_db()
+
+    # ---- モデル ----
+    def test_child_and_grandchild_take_the_top_category(self):
+        child = Task.objects.create(owner=self.me, title="文献調査", parent=self.study, category=self.lesson)
+        grandchild = Task.objects.create(owner=self.me, title="第1章", parent=child)
+        self.assertEqual(child.category, self.research)  # 自分で「授業」を選んでも、上にそろう
+        self.assertEqual(grandchild.category, self.research)
+
+    def test_changing_the_top_category_updates_its_tasks(self):
+        child = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        grandchild = Task.objects.create(owner=self.me, title="第1章", parent=child)
+        self.study.category = self.lesson
+        self.study.save()
+        self.refresh(child, grandchild)
+        self.assertEqual((child.category, grandchild.category), (self.lesson, self.lesson))
+
+    def test_moving_a_task_brings_its_children_to_the_new_category(self):
+        sub = Task.objects.create(owner=self.me, title="問1", parent=self.report)
+        self.report.parent = self.study
+        self.report.save()
+        self.refresh(self.report, sub)
+        self.assertEqual((self.report.category, sub.category), (self.research, self.research))
+
+    def test_taking_a_task_out_keeps_its_category(self):
+        child = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        child.parent = None
+        child.save()
+        self.refresh(child)
+        self.assertEqual(child.category, self.research)
+
+    def test_save_with_update_fields_also_saves_category(self):
+        # ドラッグでつなぐとき（task_link）は update_fields で保存する。それでも分類がそろう
+        self.report.parent = self.study
+        self.report.save(update_fields=["parent", "updated_at"])
+        self.refresh(self.report)
+        self.assertEqual(self.report.category, self.research)
+
+    def test_migration_fixes_old_mismatched_data(self):
+        import importlib
+
+        from django.apps import apps
+
+        child = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        Task.objects.filter(pk=child.pk).update(category=self.lesson)  # 前のちぐはぐなデータを再現（save を通さない）
+        migration = importlib.import_module("tasks.migrations.0010_sync_child_categories")
+        migration.sync_child_categories(apps, None)
+        self.refresh(child)
+        self.assertEqual(child.category, self.research)
+
+    # ---- 画面 ----
+    def test_form_ignores_category_when_parent_is_chosen(self):
+        response = self.client.post(
+            reverse("task_create"),
+            {"title": "問1", "parent": self.study.pk, "category": "__new__", "new_category_name": "", "importance": 2},
+        )
+        self.assertEqual(response.status_code, 302)  # 新しい分類の名前がなくても、親があれば止めない
+        task = Task.objects.get(title="問1")
+        self.assertEqual(task.category, self.research)
+        self.assertEqual(self.me.categories.count(), 4)  # 分類は増えない
+
+    def test_form_shows_parent_categories(self):
+        response = self.client.get(reverse("task_create"))
+        self.assertContains(response, 'id="parent-categories"')
+        self.assertContains(response, 'id="category-follows-parent"')
+        names = response.context["form"].parent_category_names
+        self.assertEqual(names[str(self.study.pk)], "研究")
+
+    def test_link_dialog_tells_category_change(self):
+        url = reverse("task_link_options", args=[self.report.pk])
+        data = self.client.get(url, {"target": self.study.pk}).json()
+        self.assertEqual(data["child"]["notes"], ["分類：授業 → 研究（中の作業もそろう）"])
+        self.assertEqual(data["after"]["notes"], [])  # 前後でつないでも、分類は変わらない
+
+    def test_link_dialog_tells_replacing_current_links(self):
+        other = Task.objects.create(owner=self.me, title="ゼミ", category=self.research)
+        self.report.parent = self.study
+        self.report.prerequisite = other
+        self.report.save()
+        url = reverse("task_link_options", args=[self.report.pk])
+        # 今と同じ相手（ゼミ）とは、前後は入れかえにならない
+        self.assertEqual(self.client.get(url, {"target": other.pk}).json()["after"]["notes"], [])
+        # 別の相手（発表）なら、今の親・今の先にやることを入れかえることになる
+        target = Task.objects.create(owner=self.me, title="発表", category=self.research)
+        data = self.client.get(url, {"target": target.pk}).json()
+        self.assertIn("⚠ 今：「卒業研究」の中 → 入れかえ", data["child"]["notes"])
+        self.assertIn("⚠ 今：「ゼミ」が終わってから → 入れかえ", data["after"]["notes"])
+
+    def test_drag_into_another_category_moves_it(self):
+        self.client.post(reverse("task_link", args=[self.report.pk]), {"target": self.study.pk, "relation": "child"})
+        self.refresh(self.report)
+        self.assertEqual(self.report.category, self.research)
 
 
 class TaskModelTests(TestCase):
