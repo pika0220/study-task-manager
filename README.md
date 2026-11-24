@@ -37,3 +37,8 @@ uv run python manage.py runserver
 ```
 
 ブラウザで http://127.0.0.1:8000/ を開きます。
+
+
+## 公開する
+
+PythonAnywhere（無料プラン）で公開しています。手順は [docs/deploy.md](docs/deploy.md) にあります。
