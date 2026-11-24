@@ -103,3 +103,73 @@ class InviteCodeTests(TestCase):
     def test_development_needs_no_code(self):
         self.assertNotContains(self.client.get(reverse("signup")), "招待コード")
         self.assertRedirects(self.signup(), reverse("guide"))
+
+
+# パスワードの確かめ方（Issue #59）：新しいパスワードは Argon2id で保存し、
+# 前の方式（PBKDF2）で保存した人も、そのままログインできて、そのときに Argon2id へ置きかわる
+@override_settings(INVITE_CODE="", SIGNUP_WITHOUT_INVITE=True)
+class PasswordHasherTests(TestCase):
+    password = "Benkyo-2026-pass"
+    # 保存した文字の頭：方式・Argon2 の種類・版・設定（メモリ19MiB・2回・1並列）
+    argon2_prefix = "argon2$argon2id$v=19$m=19456,t=2,p=1$"
+
+    def stored(self, username):
+        return get_user_model().objects.get(username=username).password
+
+    def make_old_user(self, username):
+        # 前の方式で保存した人を作る。本物は100万回だが、テストを速くするため1000回にする（仕組みは同じ）
+        from django.contrib.auth.hashers import PBKDF2PasswordHasher
+
+        hasher = PBKDF2PasswordHasher()
+        user = get_user_model().objects.create(username=username)
+        user.password = hasher.encode(self.password, hasher.salt(), iterations=1000)
+        user.save()
+        return user
+
+    def test_signup_saves_argon2id(self):
+        self.client.post(
+            reverse("signup"),
+            {"username": "kango", "password1": self.password, "password2": self.password},
+        )
+        self.assertTrue(self.stored("kango").startswith(self.argon2_prefix))
+
+    def test_new_user_can_log_in(self):
+        get_user_model().objects.create_user("yakugaku", password=self.password)
+        self.assertTrue(self.stored("yakugaku").startswith(self.argon2_prefix))
+        response = self.client.post(
+            reverse("login"), {"username": "yakugaku", "password": self.password}
+        )
+        self.assertRedirects(response, reverse("home"))
+
+    def test_old_user_logs_in_and_is_upgraded(self):
+        self.make_old_user("mae")
+        self.assertTrue(self.stored("mae").startswith("pbkdf2_sha256$"))
+        response = self.client.post(
+            reverse("login"), {"username": "mae", "password": self.password}
+        )
+        self.assertRedirects(response, reverse("home"))
+        # ログインできたときに、新しい方式で保存し直している
+        self.assertTrue(self.stored("mae").startswith(self.argon2_prefix))
+        # 置きかわったあとも、同じパスワードでログインできる
+        self.client.post(reverse("logout"))
+        response = self.client.post(
+            reverse("login"), {"username": "mae", "password": self.password}
+        )
+        self.assertRedirects(response, reverse("home"))
+
+    def test_wrong_password_does_not_upgrade(self):
+        self.make_old_user("mae")
+        before = self.stored("mae")
+        response = self.client.post(reverse("login"), {"username": "mae", "password": "machigai"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.stored("mae"), before)
+
+    def test_argon2_is_fast(self):
+        # 前の方式（このパソコンで約1秒）より、ずっと速いこと。遅いパソコンでも落ちないよう、余裕を持って0.5秒にする
+        import time
+
+        from django.contrib.auth.hashers import make_password
+
+        start = time.perf_counter()
+        make_password(self.password)
+        self.assertLess(time.perf_counter() - start, 0.5)
