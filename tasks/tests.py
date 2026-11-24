@@ -2019,3 +2019,24 @@ class EncryptionTests(TestCase):
         response = self.client.get(reverse("help"))
         self.assertContains(response, "🛡️ プライバシー")
         self.assertContains(response, "管理画面に出るのは件数だけ")
+
+
+class StaticCssTests(TestCase):
+    """前もって作った CSS（Issue #55）。CDN の Tailwind（ブラウザ版）や daisyUI の全部は読みこまない。"""
+
+    def test_pages_load_the_built_css_only(self):
+        user = get_user_model().objects.create_user("student", password="test-pass-123")
+        self.client.force_login(user)
+        for url in (reverse("home"), reverse("login")):
+            with self.subTest(url=url):
+                self.client.force_login(user) if url != reverse("login") else self.client.logout()
+                response = self.client.get(url)
+                self.assertContains(response, 'href="/static/css/app.css"')
+                self.assertNotContains(response, "cdn.jsdelivr.net")
+                self.assertNotContains(response, "tailwindcss/browser")
+
+    def test_built_css_exists_and_has_daisyui(self):
+        css = (Path(__file__).resolve().parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
+        self.assertIn("--color-base-100", css)  # daisyUI のテーマの色
+        self.assertIn(".btn", css)
+        self.assertLess(len(css), 300_000)  # 全部の部品（約1.1MB）ではなく、使っている分だけ

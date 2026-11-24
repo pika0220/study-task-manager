@@ -39,6 +39,25 @@ uv run python manage.py runserver
 ブラウザで http://127.0.0.1:8000/ を開きます。
 
 
+## 見た目（CSS）を作り直す
+
+画面の CSS は、Tailwind CSS と daisyUI で前もって1つのファイル（`static/css/app.css`）に作っています（Issue #55）。
+テンプレートや JavaScript で新しい class を使ったら、作り直してコミットします（CI が作り忘れを確かめます）。
+
+道具は GitHub に置いていないので、最初に1回だけ `tools` に入れます（Windows・PowerShell）。
+
+```powershell
+New-Item -ItemType Directory -Force tools
+Invoke-WebRequest -Uri https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.4/tailwindcss-windows-x64.exe -OutFile tools\tailwindcss.exe
+Invoke-WebRequest -Uri https://github.com/saadeghi/daisyui/releases/download/v5.7.50/daisyui.mjs -OutFile tools\daisyui.mjs
+```
+
+作り直すときは、次のコマンドを打ちます。
+
+```powershell
+tools\tailwindcss.exe -i assets\css\app.css -o static\css\app.css --minify
+```
+
 ## 公開する
 
 PythonAnywhere（無料プラン）で公開しています。手順は [docs/deploy.md](docs/deploy.md) にあります。

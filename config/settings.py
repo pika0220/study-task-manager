@@ -209,6 +209,8 @@ STATIC_URL = "static/"
 # 公開するとき、CSS・JavaScript・画像（管理画面の分も）を collectstatic でここに集める（Issue #53）。
 # PythonAnywhere では、Web タブで「/static/ → このフォルダ」と設定して、サーバーが直接配る
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# アプリに属さない、全画面で使う静的ファイル（前もって作った CSS：static/css/app.css。Issue #55）
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # アップロードされた写真の保存場所。
 # MEDIA_URL は作らず、urls.py でもこのフォルダを公開しない。写真は tasks.views.source_photo が
