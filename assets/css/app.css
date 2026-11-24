@@ -1,0 +1,21 @@
+/*
+  画面の見た目の入口（Issue #55）。ここから、使っている部品の CSS だけを1つのファイル（static/css/app.css）に組み立てる。
+
+  前は、ページを開くたびに、スマホの中で Tailwind（ブラウザ版）が CSS を作っていて、
+  daisyUI も全部の部品（約1.1MB）を読みこんでいた。前もって作っておくと、スマホの仕事が減って軽くなる。
+
+  作り方（プロジェクトのフォルダで。道具の入れ方は README）：
+    tools\tailwindcss.exe -i assets\css\app.css -o static\css\app.css --minify
+  テンプレートや JavaScript で、新しい class を使ったら作り直す（CI が作り忘れを確かめる）。
+*/
+
+/* Tailwind の土台・部品・ユーティリティ（w-full・gap-2 など）。
+   使っている class は、プロジェクトの中のファイル（.html・.js・.py）から自動で探す（.gitignore のものは見ない） */
+@import "tailwindcss";
+
+/* 道具と説明のファイルは、class を探す対象から外す */
+@source not "../../tools";
+@source not "../../docs";
+
+/* daisyUI（btn・card・badge などの部品と、明るい・暗いテーマ）。tools に置いたファイルを使う */
+@plugin "../../tools/daisyui.mjs";

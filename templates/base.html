@@ -1,4 +1,4 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
@@ -6,13 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}タスク管理{% endblock %}</title>
   <!--
-    見た目のライブラリ（CDNから読み込む）
+    見た目（Issue #55）：Tailwind CSS と daisyUI で、使っている部品の CSS だけを前もって1つにまとめたファイル。
     - daisyUI：ボタン・カード・入力欄などの部品
     - Tailwind CSS：class に書くだけで余白や大きさを整える道具
-    公開するときは、CDNではなく自分のサーバーから配る方法に切り替える
+    元は assets/css/app.css。作り方は README（前はページを開くたびにスマホの中で作っていて重かった）
   -->
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@5.7.50/daisyui.css" rel="stylesheet" type="text/css">
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.4"></script>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
 <body class="min-h-screen bg-base-200">
   <!-- 上のバー：アプリ名とログアウト -->

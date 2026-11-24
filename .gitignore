@@ -25,3 +25,6 @@ Thumbs.db
 
 # collectstatic の出力
 staticfiles/
+
+# CSS を作る道具（Tailwind の単体のプログラム・daisyui.mjs）。作り方は README（Issue #55）
+tools/
