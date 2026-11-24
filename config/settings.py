@@ -171,6 +171,17 @@ DATABASES = {
 }
 
 
+# パスワードの確かめ方（Issue #59）。くわしくは accounts/hashers.py
+# 1つ目：新しく保存するときに使う方式（Argon2id。ログインが速い）
+# 2つ目から：前の方式で保存したパスワードを確かめるためのもの。
+#   前の方式の人がログインできたら、Django がそのときに1つ目の方式で保存し直す（次からは速くなる）
+PASSWORD_HASHERS = [
+    "accounts.hashers.OwaspArgon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+]
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
