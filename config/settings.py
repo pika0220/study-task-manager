@@ -19,6 +19,30 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def load_env_file(path):
+    """「名前=値」を1行ずつ書いたファイル（.env）を読んで、環境変数にする（Issue #53）。
+
+    公開するサーバー（PythonAnywhere）では、鍵や招待コードをプロジェクトの .env に書いておく。
+    Web アプリからも、コンソールの manage.py（migrate など）からも同じファイルを読むので、
+    同じ鍵が使われる（鍵がずれると、暗号化したデータを元に戻せなくなるため）。
+    - .env は GitHub に置かない（.gitignore で除外している）
+    - すでにある環境変数のほうを優先する（setdefault）
+    - 自分のパソコンには .env を置かない → 今まで通り開発用の値になる
+    """
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)  # 値の中の「=」（暗号化の鍵の最後など）はそのまま残す
+        os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
+
+
+# DJANGO_ENV_FILE で別のファイルも指定できる（テストで使う）
+load_env_file(Path(os.environ.get("DJANGO_ENV_FILE", BASE_DIR / ".env")))
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -182,6 +206,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+# 公開するとき、CSS・JavaScript・画像（管理画面の分も）を collectstatic でここに集める（Issue #53）。
+# PythonAnywhere では、Web タブで「/static/ → このフォルダ」と設定して、サーバーが直接配る
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # アップロードされた写真の保存場所。
 # MEDIA_URL は作らず、urls.py でもこのフォルダを公開しない。写真は tasks.views.source_photo が
@@ -197,3 +224,12 @@ LOGOUT_REDIRECT_URL = "login"  # ログアウトした後に移る先
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# エラーの記録（Issue #53）。本番（DEBUG=False）でも、サーバーの中で起きたエラーを画面ではなく
+# サーバーの記録（PythonAnywhere の error log）に書き出す。何もしないと、本番ではどこにも出ない
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {"django": {"handlers": ["console"], "level": "ERROR"}},
+}
