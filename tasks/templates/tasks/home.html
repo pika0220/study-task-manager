@@ -6,7 +6,7 @@
 {% block content %}
   <div class="mb-4 flex items-end justify-between gap-2">
     <h1 class="text-xl font-bold">やること</h1>
-    <span class="text-sm text-base-content/70">未完了 <span class="text-lg font-bold text-primary">{{ open_count }}</span> 件</span>
+    <span class="text-sm text-base-content/70">未完了 <span id="open-count" data-swap-id="open-count" class="text-lg font-bold text-primary">{{ open_count }}</span> 件</span>
   </div>
 
   {% if open_tasks %}
@@ -31,7 +31,7 @@
   <!-- 完了したタスク：ふだんは閉じておき、押すと開く -->
   {% if done_tasks %}
     <details class="collapse collapse-arrow mt-6 bg-base-100 shadow-sm">
-      <summary class="collapse-title font-bold">完了したタスク（{{ done_tasks|length }}件）</summary>
+      <summary class="collapse-title font-bold">完了したタスク（<span id="done-count" data-swap-id="done-count">{{ done_tasks|length }}</span>件）</summary>
       <div class="collapse-content flex flex-col gap-3">
         {% for task in done_tasks %}
           {% include "tasks/_task_card.html" with task=task %}

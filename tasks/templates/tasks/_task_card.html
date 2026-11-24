@@ -4,19 +4,22 @@
   importance の数字：3＝高、2＝中、1＝低
 {% endcomment %}
 <!-- data-task-id・data-title：長押しで持ち上げて、別のカードに落とすときに使う（drag_link.js） -->
-<article data-task-id="{{ task.pk }}" data-title="{{ task.title }}" class="card border-l-8 bg-base-100 shadow-sm
+<!-- id="card-○"：○ を押したとき（htmx・Issue #57）に、このカードだけを書きかえるための名前 -->
+<article id="card-{{ task.pk }}" data-swap-id="card-{{ task.pk }}" data-task-id="{{ task.pk }}" data-title="{{ task.title }}" class="card border-l-8 bg-base-100 shadow-sm
   {% if task.importance == 3 %}border-error{% elif task.importance == 2 %}border-warning{% else %}border-base-300{% endif %}
   {% if task.is_done %}opacity-60{% elif task.is_locked %}opacity-75{% endif %}">
   <div class="card-body flex-row items-start gap-3 p-4">
-    <!-- 完了・未完了を切り替えるボタン。データを変えるので POST で送る -->
-    <form method="post" action="{% url 'task_toggle' task.pk %}" class="shrink-0">
+    <!-- 完了・未完了を切り替えるボタン。データを変えるので POST で送る。
+         htmx（Issue #57）：ページを読み直さず、このカードだけ書きかえる。hx-sync="this:drop"：送っている間の2回目は無視 -->
+    <form method="post" action="{% url 'task_toggle' task.pk %}" class="toggle-form shrink-0"
+          hx-post="{% url 'task_toggle' task.pk %}" hx-target="#card-{{ task.pk }}" hx-swap="outerHTML" hx-sync="this:drop">
       {% csrf_token %}
       <!-- 押したあと、今いる画面（ホームや詳細画面）に戻るための情報 -->
       <input type="hidden" name="next" value="{{ request.get_full_path }}">
       {% if task.is_done %}
-        <button type="submit" class="btn btn-circle btn-success btn-md relative after:absolute after:-inset-1 after:content-['']" aria-label="「{{ task.title }}」を未完了に戻す">✓</button>
+        <button type="submit" data-check class="btn btn-circle btn-success btn-md relative after:absolute after:-inset-1 after:content-['']" aria-label="「{{ task.title }}」を未完了に戻す">✓</button>
       {% else %}
-        <button type="submit" class="btn btn-circle btn-outline btn-md relative after:absolute after:-inset-1 after:content-['']" aria-label="「{{ task.title }}」を完了にする"></button>
+        <button type="submit" data-check class="btn btn-circle btn-outline btn-md relative after:absolute after:-inset-1 after:content-['']" aria-label="「{{ task.title }}」を完了にする"></button>
       {% endif %}
     </form>
 

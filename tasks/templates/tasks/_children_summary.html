@@ -1,0 +1,13 @@
+{% comment %}
+  ▶ の行（サブタスクの数と進み具合）。_children_toggle.html の中で使う。
+  id="summary-○"：サブタスクの ○ を押したとき（htmx・Issue #57）に、この行だけ書きかえて ％ を直すため。
+  使い方：{% include "tasks/_children_summary.html" with parent=task %}
+{% endcomment %}
+<!-- スマホで押しやすいよう、行の高さを44px以上（min-h-11）にし、押したときに色が変わるようにする -->
+<summary id="summary-{{ parent.pk }}" data-swap-id="summary-{{ parent.pk }}"
+         class="-mx-2 flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-sm select-none active:bg-base-200 [&::-webkit-details-marker]:hidden">
+  <!-- 開いているときは ▶ を90度回して ▼ に見せる（自分のすぐ外の details が開いているときだけ回す。孫の▶は別に回る） -->
+  <span class="inline-block w-4 text-center transition-transform [details[open]>summary>&]:rotate-90" aria-hidden="true">▶</span>
+  <progress class="progress progress-primary w-full" value="{{ parent.progress }}" max="100"></progress>
+  <span class="shrink-0 text-xs">📁 サブタスク {{ parent.children.all|length }}件・{{ parent.progress }}%</span>
+</summary>

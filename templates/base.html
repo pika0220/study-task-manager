@@ -12,8 +12,15 @@
     元は assets/css/app.css。作り方は README（前はページを開くたびにスマホの中で作っていて重かった）
   -->
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <!--
+    htmx（Issue #57）：押したときに、ページを読み直さず画面の一部だけを書きかえるライブラリ。CDN ではなく自分のサーバーから配る。
+    app.js：○ を押した瞬間に見た目を変える・失敗したら戻す・開いていた ▶ を開いたままにする など
+  -->
+  <script src="{% static 'js/htmx.min.js' %}" defer></script>
+  <script src="{% static 'js/app.js' %}" defer></script>
 </head>
-<body class="min-h-screen bg-base-200">
+<!-- hx-headers：htmx で送るときにも、フォームの合言葉（CSRF トークン）を付ける -->
+<body class="min-h-screen bg-base-200" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   <!-- 上のバー：アプリ名とログアウト -->
   <header class="navbar sticky top-0 z-10 bg-base-100 shadow-sm">
     <div class="mx-auto flex w-full max-w-md items-center justify-between gap-2 px-2">

@@ -1,0 +1,35 @@
+{% comment %}
+  詳細画面の資料の一覧。「消す」を押したとき（htmx・Issue #57）に、この一覧だけ書きかえるため、部品に分けた。
+{% endcomment %}
+<div id="sources-list" class="flex flex-col gap-3">
+      {% for source in task.sources.all %}
+        <div class="flex items-start gap-2 border-b border-base-200 pb-3">
+          <span class="badge badge-outline badge-sm mt-1 shrink-0">{{ source.get_kind_display }}</span>
+          <div class="min-w-0 flex-1 text-sm">
+            {% if source.memo %}<p class="break-words">{{ source.memo }}</p>{% endif %}
+            {% if source.photo %}
+              <!-- 写真は持ち主だけが見られる画面（source_photo）から読み込む。押すと別のタブで大きく見られる -->
+              <a href="{% url 'source_photo' source.pk %}" target="_blank" rel="noopener noreferrer" class="mt-1 block w-fit">
+                <img src="{% url 'source_photo' source.pk %}" alt="資料の写真" loading="lazy"
+                     class="max-h-40 rounded-lg border border-base-300 object-contain">
+              </a>
+            {% endif %}
+            {% if source.url %}
+              <!-- target="_blank"：別のタブで開く。rel="noopener noreferrer"：開いた先からこのアプリを操作されないようにする -->
+              <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer"
+                 class="link link-primary inline-flex min-h-11 items-center break-all">🔗 {{ source.url|truncatechars:40 }}</a>
+            {% endif %}
+          </div>
+          <!-- hx-confirm：消す前に確かめる。htmx（Issue #57）：消したあと、この一覧だけ書きかえる -->
+          <form method="post" action="{% url 'source_delete' source.pk %}" class="shrink-0"
+                hx-post="{% url 'source_delete' source.pk %}" hx-target="#sources-list" hx-swap="outerHTML"
+                hx-confirm="この資料を消しますか？{% if source.photo %}写真も消えます．{% endif %}">
+            {% csrf_token %}
+            {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
+            <button type="submit" class="btn btn-ghost btn-sm min-h-11 text-error">消す</button>
+          </form>
+        </div>
+      {% empty %}
+        <p class="text-sm text-base-content/60">課題の指示を残す：プリントの写真・Classroom やスライドのリンク・口頭のメモ など</p>
+      {% endfor %}
+</div>

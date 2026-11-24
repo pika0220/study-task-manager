@@ -18,6 +18,7 @@
 @source "../../templates";               /* 全画面の土台（base.html）・ログイン・エラー */
 @source "../../tasks/templates";         /* タスクの画面 */
 @source "../../tasks/static/tasks";      /* JavaScript があとから付ける class */
+@source "../../static/js/app.js";        /* 全画面の JavaScript（htmx のための部品。htmx そのものは見ない） */
 @source "../../tasks/forms.py";          /* 入力欄の class（input w-full など） */
 @source "../../accounts/forms.py";
 

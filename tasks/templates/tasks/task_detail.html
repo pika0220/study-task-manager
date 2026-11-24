@@ -15,50 +15,7 @@
     {% endif %}
   </div>
 
-  <div class="card bg-base-100 shadow-sm">
-    <div class="card-body gap-3">
-      <div class="flex items-start justify-between gap-2">
-        <h1 class="break-words text-xl font-bold {% if task.is_done %}line-through{% endif %}">{{ task.title }}</h1>
-        <span class="badge shrink-0
-          {% if task.importance == 3 %}badge-error{% elif task.importance == 2 %}badge-warning{% else %}badge-ghost{% endif %}">
-          重要度 {{ task.get_importance_display }}
-        </span>
-      </div>
-
-      <!-- 項目名と中身を2列で並べる -->
-      <dl class="grid grid-cols-[5rem_1fr] gap-y-2 text-sm">
-        <dt class="text-base-content/60">分類</dt>
-        <dd>{{ task.category.name|default:"分類なし" }}</dd>
-        <dt class="text-base-content/60">締切</dt>
-        <dd>
-          {% if task.due_at %}
-            {% with status=task.due_status %}
-              {% if status == "overdue" %}<span class="badge badge-error badge-sm">期限切れ</span>{% elif status == "today" %}<span class="badge badge-warning badge-sm">今日</span>{% endif %}
-            {% endwith %}
-            {{ task.due_at|date:"Y/n/j（D）H:i" }}
-          {% else %}
-            なし
-          {% endif %}
-        </dd>
-        <dt class="text-base-content/60">状態</dt>
-        <dd>{% if task.is_done %}完了（{{ task.done_at|date:"n/j H:i" }}）{% else %}未完了{% endif %}</dd>
-        <dt class="text-base-content/60">メモ</dt>
-        <dd class="break-words">{{ task.memo|linebreaksbr|default:"なし" }}</dd>
-      </dl>
-
-      <div class="flex gap-2">
-        <!-- 完了・未完了の切り替え。押したらこの画面に戻る（next） -->
-        <form method="post" action="{% url 'task_toggle' task.pk %}" class="flex-1">
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <button type="submit" class="btn btn-block {% if task.is_done %}btn-outline{% else %}btn-success{% endif %}">
-            {% if task.is_done %}未完了に戻す{% else %}完了にする{% endif %}
-          </button>
-        </form>
-        <a href="{% url 'task_update' task.pk %}{{ back_query }}" class="btn flex-1">編集</a>
-      </div>
-    </div>
-  </div>
+  {% include "tasks/_detail_summary.html" %}
 
   <!-- つながり：親子（📁 サブタスク）は「上下」、前後（🔒 終わってから）は「左から右」で見せる -->
   <h2 class="mt-6 mb-3 text-lg font-bold">つながり</h2>
@@ -110,68 +67,17 @@
         <p class="text-base-content/60">🔒 なし（編集 → 🔒 何が終わってから取りかかる？）</p>
       {% endif %}
 
-      <!-- 🔗 関連（Issue #43）：順番なしでつないだタスク。違う分類のタスクも、ここには全部出る -->
-      {% with related=task.related.all %}
-        {% if related %}
-          <div class="flex flex-col gap-1">
-            <span>🔗 関連</span>
-            <ul class="flex flex-wrap gap-2">
-              {% for other in related %}
-                <li class="flex items-center rounded-lg border border-base-300">
-                  <a href="{% url 'task_detail' other.pk %}{{ back_query }}"
-                     class="break-words py-1 pl-2 pr-1 hover:underline {% if other.is_done %}text-base-content/50 line-through{% endif %}">{{ other.title }}</a>
-                  <form method="post" action="{% url 'task_unlink' task.pk %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="relation" value="related">
-                    <input type="hidden" name="target" value="{{ other.pk }}">
-                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                    <button class="btn btn-ghost btn-xs btn-square" aria-label="「{{ other.title }}」との 🔗 を外す">✕</button>
-                  </form>
-                </li>
-              {% endfor %}
-            </ul>
-          </div>
-        {% else %}
-          <p class="text-base-content/60">🔗 なし（ホーム・🗺️ マップで，カード → 別のカード）</p>
-        {% endif %}
-      {% endwith %}
+      {% include "tasks/_related.html" %}
     </div>
   </div>
 
   <!-- 資料（F-04）：課題の指示に関係するもの（プリント・スライド・リンク・メモ・写真） -->
   <div class="mt-6 mb-3 flex items-center justify-between gap-2">
-    <h2 class="text-lg font-bold">資料（{{ task.sources.all|length }}件）</h2>
+    <h2 class="text-lg font-bold">資料（<span id="sources-count">{{ task.sources.all|length }}</span>件）</h2>
   </div>
   <div class="card bg-base-100 shadow-sm">
     <div class="card-body gap-3 p-4">
-      {% for source in task.sources.all %}
-        <div class="flex items-start gap-2 border-b border-base-200 pb-3">
-          <span class="badge badge-outline badge-sm mt-1 shrink-0">{{ source.get_kind_display }}</span>
-          <div class="min-w-0 flex-1 text-sm">
-            {% if source.memo %}<p class="break-words">{{ source.memo }}</p>{% endif %}
-            {% if source.photo %}
-              <!-- 写真は持ち主だけが見られる画面（source_photo）から読み込む。押すと別のタブで大きく見られる -->
-              <a href="{% url 'source_photo' source.pk %}" target="_blank" rel="noopener noreferrer" class="mt-1 block w-fit">
-                <img src="{% url 'source_photo' source.pk %}" alt="資料の写真" loading="lazy"
-                     class="max-h-40 rounded-lg border border-base-300 object-contain">
-              </a>
-            {% endif %}
-            {% if source.url %}
-              <!-- target="_blank"：別のタブで開く。rel="noopener noreferrer"：開いた先からこのアプリを操作されないようにする -->
-              <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer"
-                 class="link link-primary inline-flex min-h-11 items-center break-all">🔗 {{ source.url|truncatechars:40 }}</a>
-            {% endif %}
-          </div>
-          <form method="post" action="{% url 'source_delete' source.pk %}" class="shrink-0"
-                onsubmit="return confirm('この資料を消しますか？{% if source.photo %}写真も消えます．{% endif %}')">
-            {% csrf_token %}
-            {% if back_path %}<input type="hidden" name="back" value="{{ back_path }}">{% endif %}
-            <button type="submit" class="btn btn-ghost btn-sm min-h-11 text-error">消す</button>
-          </form>
-        </div>
-      {% empty %}
-        <p class="text-sm text-base-content/60">課題の指示を残す：プリントの写真・Classroom やスライドのリンク・口頭のメモ など</p>
-      {% endfor %}
+      {% include "tasks/_sources_list.html" %}
 
       <!-- 資料を足すフォーム（押すと開く） -->
       <details {% if not task.sources.all %}open{% endif %}>

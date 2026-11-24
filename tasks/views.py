@@ -1,4 +1,5 @@
 import math
+import re
 from collections import defaultdict
 from datetime import timedelta
 from urllib.parse import urlencode, urlsplit
@@ -8,8 +9,9 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Q
 from django.core.exceptions import ValidationError
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -79,6 +81,55 @@ def _back_context(request, focus=None):
     return {"back": back, "back_path": path or "", "back_query": _back_query(request)}
 
 
+# ---- 画面の一部だけ書きかえる（htmx・Issue #57）----
+# htmx から来た操作には、ページ全体ではなく、変わった部分の HTML だけを返す。
+# 書きかえ先は id で決まっている：card-○（カード）・row-○（サブタスクの行）・summary-○（▶ の行）・
+# detail-○（詳細の上の欄）・open-count / done-count（ホームの件数）。○ はタスクの番号。
+# どの部分が今の画面にあるかは、ブラウザ（static/js/app.js）が on_page で教えてくれる。
+
+
+def _is_htmx(request):
+    """htmx から送られてきた操作か（htmx は HX-Request: true という印を付けて送る）。"""
+    return request.headers.get("HX-Request") == "true"
+
+
+def _on_page(request):
+    """今の画面にある書きかえ先の id の集まり（例：{"card-5", "row-7", "open-count"}）。"""
+    return {part for part in request.POST.get("on_page", "").split(",") if part}
+
+
+def _render_part(request, template, context, oob=False):
+    """部分の HTML を作る。oob=True のときは、ほかの場所（id が同じ部分）も一緒に書きかえる印を付ける。
+
+    hx-swap-oob：htmx の「メインの場所とは別に、同じ id の部分も書きかえて」という印。
+    いちばん外側の要素にだけ付ける（中の要素に付けると、そこもばらばらに書きかえられてしまうため）。
+    """
+    html = render_to_string(template, {**_back_context(request), **context}, request)
+    if oob:
+        html = re.sub(r"<(article|li|summary|div|span)\b", r'<\1 hx-swap-oob="true"', html, count=1)
+    return html
+
+
+def _task_for_part(user, pk):
+    """部分を作り直すためのタスク。カードや行に出すもの（サブタスクの数・資料の数など）をまとめて読む。"""
+    return (
+        user.tasks.select_related("category", "prerequisite", "parent")
+        .prefetch_related("children", "sources")
+        .get(pk=pk)
+    )
+
+
+def _task_part(request, task, part_id, oob=False):
+    """id（card-○・row-○・detail-○）に合わせて、そのタスクの部分を作る。"""
+    kind = part_id.split("-")[0]
+    task = _task_for_part(request.user, task.pk)
+    if kind == "card":
+        return _render_part(request, "tasks/_task_card.html", {"task": task, "card_level": task.depth()}, oob)
+    if kind == "row":
+        return _render_part(request, "tasks/_child_row.html", {"task": task, "level": task.depth()}, oob)
+    return _render_part(request, "tasks/_detail_summary.html", {"task": task}, oob)
+
+
 @login_required  # ログインしていない人はログイン画面に送られる
 def home(request):
     """ホーム画面。自分のタスクを、未完了と完了に分けてカードで並べる。"""
@@ -88,12 +139,8 @@ def home(request):
     tasks = (
         request.user.tasks.filter(parent=None)
         .select_related("category", "prerequisite")
-        .prefetch_related(
-            "children__children__children",
-            "children__prerequisite",
-            "children__children__prerequisite",
-            "sources",
-        )
+        # サブタスクの中身は ▶ を押したときに読む（task_children）。ここでは数と進み具合のために1段目だけ
+        .prefetch_related("children", "sources")
     )
     # 並び順はモデルの Meta.ordering（未完了 → 重要度が高い → 締切が近い）のまま
     open_tasks = [task for task in tasks if not task.is_done]
@@ -133,11 +180,11 @@ class TaskDetailView(OwnTaskMixin, DetailView):
             .get_queryset()
             .select_related("parent", "category", "prerequisite")
             .prefetch_related(
-                "children__children__children",
+                # サブタスクのカードの中身（孫）は、▶ を押したときに読む。ここでは数と進み具合のために孫まで
+                "children__children",
                 "children__category",
                 "children__sources",
                 "children__prerequisite",
-                "children__children__prerequisite",
                 "sources",
                 "dependents",
                 "related",
@@ -259,6 +306,8 @@ def task_toggle(request, pk):
     task = get_object_or_404(Task, pk=pk, owner=request.user)
     task.is_done = not task.is_done
     task.save()  # 完了日時（done_at）は Task.save() の中で自動で入る・消える
+    if _is_htmx(request):
+        return _toggle_parts(request, task)
     if task.is_done:
         messages.success(request, f"「{task.title}」を完了にしました．")
     else:
@@ -269,6 +318,53 @@ def task_toggle(request, pk):
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
     return redirect("home")
+
+
+def _toggle_parts(request, task):
+    """○ を押したあと（htmx）に返す部分。ページを読み直さずに、変わったところだけを書きかえる。
+
+    - メイン：押したタスク自身（カード・行・詳細の上の欄のうち、画面にあるもの）
+    - ついでに書きかえるもの（oob）：
+      ・上のタスクの ▶ の行（進み具合の ％ が変わる）
+      ・このタスクが終わってからやるタスク（🔒 が外れる・付く）
+      ・ホームの「未完了 ○件」「完了したタスク（○件）」
+    お知らせ（messages）は出さない。見た目がその場で変わるので十分なため
+    """
+    on_page = _on_page(request)
+    own_ids = [f"{kind}-{task.pk}" for kind in ("card", "row", "detail")]
+    main_id = next((part for part in own_ids if part in on_page), None)
+    if main_id is None:
+        raise Http404  # 画面に書きかえる場所がない（ふつうは起きない）
+    html = [_task_part(request, task, main_id)]
+
+    if task.parent_id and f"summary-{task.parent_id}" in on_page:
+        parent = request.user.tasks.prefetch_related("children").get(pk=task.parent_id)
+        html.append(_render_part(request, "tasks/_children_summary.html", {"parent": parent}, oob=True))
+    for dependent in task.dependents.all():
+        for part in (f"card-{dependent.pk}", f"row-{dependent.pk}"):
+            if part in on_page:
+                html.append(_task_part(request, dependent, part, oob=True))
+    # 件数は中身（数字）だけを書きかえる（innerHTML）。要素ごと書きかえると、色や目印（data-swap-id）が消えるため
+    tops = request.user.tasks.filter(parent=None)
+    if "open-count" in on_page:
+        html.append(f'<span id="open-count" hx-swap-oob="innerHTML">{tops.filter(is_done=False).count()}</span>')
+    if "done-count" in on_page:
+        html.append(f'<span id="done-count" hx-swap-oob="innerHTML">{tops.filter(is_done=True).count()}</span>')
+    return HttpResponse("".join(html))
+
+
+@login_required
+def task_children(request, pk):
+    """▶ を押したときに読みこむ、サブタスクの行（htmx・Issue #57）。
+
+    前はホームを開くときに、全部のサブタスクを最初から HTML に入れていた（タスクが多いと重い）。
+    """
+    parent = get_object_or_404(
+        request.user.tasks.prefetch_related("children__children", "children__prerequisite"), pk=pk
+    )
+    return render(request, "tasks/_children_list.html", {
+        **_back_context(request), "parent": parent, "level": parent.depth(),
+    })
 
 
 # ---- 分類の管理（名前の変更・追加・削除）----
@@ -371,6 +467,12 @@ def source_delete(request, pk):
     source = get_object_or_404(Source, pk=pk, task__owner=request.user)
     task_pk = source.task_id
     source.delete()
+    if _is_htmx(request):
+        # 資料の一覧だけを書きかえ、見出しの件数も一緒に直す（Issue #57）
+        task = request.user.tasks.prefetch_related("sources").get(pk=task_pk)
+        html = _render_part(request, "tasks/_sources_list.html", {"task": task})
+        html += f'<span id="sources-count" hx-swap-oob="innerHTML">{task.sources.count()}</span>'
+        return HttpResponse(html)
     messages.success(request, "資料を消しました．")
     return redirect(_with_back(request, reverse("task_detail", args=[task_pk])))
 
@@ -928,6 +1030,10 @@ def task_unlink(request, pk):
             messages.error(request, "外すつながりがありません．")
         else:
             task.related.remove(other)
+            if _is_htmx(request):
+                # 詳細画面の 🔗 の欄だけを書きかえる（Issue #57）
+                task = request.user.tasks.prefetch_related("related").get(pk=task.pk)
+                return HttpResponse(_render_part(request, "tasks/_related.html", {"task": task}))
             messages.success(request, f"「{task.title}」と「{other.title}」の 🔗 を外しました．")
         return _redirect_next(request, "task_map")
     field = LINK_FIELDS.get(relation)

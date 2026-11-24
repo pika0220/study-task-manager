@@ -11,6 +11,8 @@ urlpatterns = [
     path("tasks/<int:pk>/toggle/", views.task_toggle, name="task_toggle"),
     # 5番のタスクの下に子タスクを作る：/tasks/5/children/new/
     path("tasks/<int:parent_pk>/children/new/", views.TaskCreateView.as_view(), name="task_create_child"),
+    # ▶ を押したときに読みこむサブタスクの行（htmx・Issue #57）：/tasks/5/children/
+    path("tasks/<int:pk>/children/", views.task_children, name="task_children"),
     # ドラッグ＆ドロップでつなぐ：選べるつながりを調べる（GET）・保存する（POST）
     path("tasks/<int:pk>/link/options/", views.task_link_options, name="task_link_options"),
     path("tasks/<int:pk>/link/", views.task_link, name="task_link"),
