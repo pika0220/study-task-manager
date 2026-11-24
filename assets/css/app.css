@@ -10,12 +10,16 @@
 */
 
 /* Tailwind の土台・部品・ユーティリティ（w-full・gap-2 など）。
-   使っている class は、プロジェクトの中のファイル（.html・.js・.py）から自動で探す（.gitignore のものは見ない） */
-@import "tailwindcss";
+   source(none)：プロジェクト全体は探さない。README や CI の設定にある言葉（git diff の「diff」など）を
+   class とまちがえて、使っていない部品の CSS が入るのを防ぐ（入ると、パソコンと CI で結果がずれる） */
+@import "tailwindcss" source(none);
 
-/* 道具と説明のファイルは、class を探す対象から外す */
-@source not "../../tools";
-@source not "../../docs";
+/* class を探すのは、画面に関係するファイルだけ */
+@source "../../templates";               /* 全画面の土台（base.html）・ログイン・エラー */
+@source "../../tasks/templates";         /* タスクの画面 */
+@source "../../tasks/static/tasks";      /* JavaScript があとから付ける class */
+@source "../../tasks/forms.py";          /* 入力欄の class（input w-full など） */
+@source "../../accounts/forms.py";
 
 /* daisyUI（btn・card・badge などの部品と、明るい・暗いテーマ）。tools に置いたファイルを使う */
 @plugin "../../tools/daisyui.mjs";
