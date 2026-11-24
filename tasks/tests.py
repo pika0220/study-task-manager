@@ -77,8 +77,10 @@ class HomeViewTests(TestCase):
         self.assertEqual([t.title for t in response.context["done_tasks"]], ["レポート提出"])
         self.assertContains(response, "重要度 高")
         self.assertContains(response, "サブタスク 1件・0%")
-        # 子タスクは別のカードにしない（上の open_tasks が1件）。親のカードの中に1回だけ出る
-        self.assertContains(response, ">薬理学の問題集</a>", count=1)
+        # サブタスクは別のカードにしない（上の open_tasks が1件）。中身は ▶ を押したときに読む（Issue #57）
+        self.assertNotContains(response, ">薬理学の問題集</a>")
+        children = self.client.get(reverse("task_children", args=[exam.pk]))
+        self.assertContains(children, ">薬理学の問題集</a>", count=1)
         # ほかの人のタスクは出さない
         self.assertNotContains(response, "他の人のタスク")
 
@@ -312,19 +314,25 @@ class CardChildrenTests(TestCase):
         subject = Task.objects.create(owner=self.me, title="薬理学", parent=exam)
         Task.objects.create(owner=self.me, title="問題集 第1章", parent=subject, is_done=True)
         response = self.client.get(reverse("home"))
-        # 子・孫の名前がカードの中（開く部分）に入っていて、それぞれ切り替えボタンと詳細へのリンクがある
+        # ホームのカードには ▶ の行（数と進み具合）だけ。中身は ▶ を押したときに読む（Issue #57）
         self.assertContains(response, "サブタスク 1件・0%")
-        self.assertContains(response, "サブタスク 1件・100%")
-        self.assertContains(response, "薬理学")
-        self.assertContains(response, "問題集 第1章")
-        self.assertContains(response, reverse("task_toggle", args=[subject.pk]))
-        self.assertContains(response, reverse("task_detail", args=[subject.pk]))
-        self.assertContains(response, "<details", count=2)
+        self.assertContains(response, "<details", count=1)
+        self.assertContains(response, reverse("task_children", args=[exam.pk]))
+        self.assertNotContains(response, "問題集 第1章")
+        # ▶ を開くと、サブタスクの行（切り替えボタン・詳細へのリンク・その下の ▶）が来る
+        children = self.client.get(reverse("task_children", args=[exam.pk]))
+        self.assertContains(children, "薬理学")
+        self.assertContains(children, "サブタスク 1件・100%")
+        self.assertContains(children, reverse("task_toggle", args=[subject.pk]))
+        self.assertContains(children, reverse("task_detail", args=[subject.pk]))
+        self.assertContains(children, reverse("task_children", args=[subject.pk]))
+        # 孫は、薬理学の ▶ を開いたときに来る
+        self.assertContains(self.client.get(reverse("task_children", args=[subject.pk])), "問題集 第1章")
 
     def test_card_without_children_has_no_toggle(self):
         Task.objects.create(owner=self.me, title="履修登録")
         response = self.client.get(reverse("home"))
-        self.assertNotContains(response, "<details>")
+        self.assertNotContains(response, "<details")
 
     def test_home_query_count_does_not_grow_with_children(self):
         # 子タスクが増えても、データベースへの問い合わせの回数は増えない（まとめて読み込んでいる）
@@ -333,7 +341,7 @@ class CardChildrenTests(TestCase):
             sub = Task.objects.create(owner=self.me, title=f"科目{i}", parent=exam)
             Task.objects.create(owner=self.me, title=f"章{i}", parent=sub)
         self.client.get(reverse("home"))  # 1回目はセッションなどの準備があるので数えない
-        with self.assertNumQueries(7):  # 資料もまとめて読むので1回増えた（子タスクの数では増えない）
+        with self.assertNumQueries(5):  # サブタスクの中身は ▶ で読むので、1段目の分だけ（子タスクの数では増えない）
             self.client.get(reverse("home"))
 
 
@@ -390,11 +398,13 @@ class ParentSelectTests(TestCase):
         self.assertEqual(self.chapter.parent, other_top)
 
     def test_add_child_link_inside_card(self):
-        response = self.client.get(reverse("home"))
-        # 1段目・2段目の中には「＋ 子タスクを追加」があり、3段目の下にはない
-        self.assertContains(response, reverse("task_create_child", args=[self.exam.pk]))
-        self.assertContains(response, reverse("task_create_child", args=[self.subject.pk]))
-        self.assertNotContains(response, reverse("task_create_child", args=[self.chapter.pk]))
+        # ▶ を開いたときに読む行の並び（Issue #57）：1段目・2段目の中には「＋ サブタスク」があり、3段目の下にはない
+        def opened(task):
+            return self.client.get(reverse("task_children", args=[task.pk]))
+
+        self.assertContains(opened(self.exam), reverse("task_create_child", args=[self.exam.pk]))
+        self.assertContains(opened(self.subject), reverse("task_create_child", args=[self.subject.pk]))
+        self.assertNotContains(opened(self.chapter), reverse("task_create_child", args=[self.chapter.pk]))
 
 
 class CategoryTests(TestCase):
@@ -2040,3 +2050,118 @@ class StaticCssTests(TestCase):
         self.assertIn("--color-base-100", css)  # daisyUI のテーマの色
         self.assertIn(".btn", css)
         self.assertLess(len(css), 300_000)  # 全部の部品（約1.1MB）ではなく、使っている分だけ
+
+
+
+class HtmxTests(TestCase):
+    """押したときに、ページを読み直さず画面の一部だけ書きかえる（htmx・Issue #57）。"""
+
+    HX = {"HTTP_HX_REQUEST": "true"}
+
+    def setUp(self):
+        User = get_user_model()
+        self.me = User.objects.create_user("student", password="test-pass-123")
+        self.other = User.objects.create_user("other", password="test-pass-123")
+        self.study = Task.objects.create(owner=self.me, title="卒業研究")
+        self.reading = Task.objects.create(owner=self.me, title="文献調査", parent=self.study)
+        self.slides = Task.objects.create(owner=self.me, title="発表スライド", parent=self.study, prerequisite=self.reading)
+        self.client.force_login(self.me)
+
+    def toggle(self, task, on_page):
+        return self.client.post(reverse("task_toggle", args=[task.pk]), {"on_page": ",".join(on_page)}, **self.HX)
+
+    def test_base_loads_htmx_and_sends_csrf_token(self):
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, 'src="/static/js/htmx.min.js"')
+        self.assertContains(response, 'src="/static/js/app.js"')
+        self.assertContains(response, 'hx-headers=\'{"X-CSRFToken": "')
+
+    def test_toggle_card_returns_only_the_card_and_counts(self):
+        response = self.toggle(self.study, [f"card-{self.study.pk}", "open-count", "done-count"])
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertNotIn("<html", html)  # ページ全体ではない
+        self.assertIn(f'id="card-{self.study.pk}"', html)
+        self.assertIn("を未完了に戻す", html)  # ✓ になった
+        self.assertIn('<span id="open-count" hx-swap-oob="innerHTML">0</span>', html)
+        self.assertIn('<span id="done-count" hx-swap-oob="innerHTML">1</span>', html)
+        self.study.refresh_from_db()
+        self.assertTrue(self.study.is_done)
+        # お知らせは出さない（次に開いた画面に、古いお知らせが出ないように）
+        self.assertNotContains(self.client.get(reverse("home")), "完了にしました")
+
+    def test_toggle_row_also_updates_parent_progress_and_unlocks_next(self):
+        on_page = [f"row-{self.reading.pk}", f"row-{self.slides.pk}", f"summary-{self.study.pk}"]
+        html = self.toggle(self.reading, on_page).content.decode()
+        self.assertTrue(html.lstrip().startswith(f'<li id="row-{self.reading.pk}"'))
+        # 上のタスクの ▶ の行：％ が変わる
+        self.assertIn(f'<summary hx-swap-oob="true" id="summary-{self.study.pk}"', html)
+        self.assertIn("サブタスク 2件・50%", html)
+        # 文献調査が終わったので、発表スライドの 🔒 が外れる
+        part = html[html.index(f'id="row-{self.slides.pk}"'):]
+        self.assertNotIn("🔒", part)
+        # ついでに書きかえる印は、いちばん外側の要素にだけ付く
+        self.assertEqual(html.count("hx-swap-oob"), 2)
+
+    def test_toggle_detail_returns_the_top_box(self):
+        html = self.toggle(self.study, [f"detail-{self.study.pk}"]).content.decode()
+        self.assertIn(f'id="detail-{self.study.pk}"', html)
+        self.assertIn("未完了に戻す", html)
+        self.assertIn("完了（", html)
+
+    def test_toggle_needs_a_place_and_my_own_task(self):
+        self.assertEqual(self.toggle(self.study, []).status_code, 404)
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        self.assertEqual(self.toggle(others, [f"card-{others.pk}"]).status_code, 404)
+        others.refresh_from_db()
+        self.assertFalse(others.is_done)
+
+    def test_toggle_without_htmx_still_redirects(self):
+        response = self.client.post(reverse("task_toggle", args=[self.study.pk]), {"next": reverse("home")})
+        self.assertRedirects(response, reverse("home"))
+
+    def test_children_are_loaded_when_opened(self):
+        url = reverse("task_children", args=[self.study.pk])
+        response = self.client.get(url)
+        self.assertContains(response, f'id="row-{self.reading.pk}"')
+        self.assertContains(response, f'id="row-{self.slides.pk}"')
+        self.assertContains(response, "＋ サブタスク")
+        # 何件あっても、データベースへの問い合わせの回数は同じ
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as before:
+            self.client.get(url)
+        for i in range(5):
+            Task.objects.create(owner=self.me, title=f"追加{i}", parent=self.study)
+        with self.assertNumQueries(len(before)):
+            self.client.get(url)
+        # 3段目の下には ＋ サブタスク を出さない
+        chapter = Task.objects.create(owner=self.me, title="1章", parent=self.reading)
+        Task.objects.create(owner=self.me, title="1節", parent=chapter)
+        self.assertNotContains(self.client.get(reverse("task_children", args=[chapter.pk])), "＋ サブタスク")
+
+    def test_children_are_mine_only(self):
+        others = Task.objects.create(owner=self.other, title="他の人のタスク")
+        self.assertEqual(self.client.get(reverse("task_children", args=[others.pk])).status_code, 404)
+        self.client.logout()
+        url = reverse("task_children", args=[self.study.pk])
+        self.assertRedirects(self.client.get(url), f"{reverse('login')}?next={url}")
+
+    def test_delete_source_returns_the_list_and_count(self):
+        keep = Source.objects.create(task=self.study, kind="verbal", memo="残すメモ")
+        gone = Source.objects.create(task=self.study, kind="verbal", memo="消すメモ")
+        html = self.client.post(reverse("source_delete", args=[gone.pk]), **self.HX).content.decode()
+        self.assertTrue(html.lstrip().startswith('<div id="sources-list"'))
+        self.assertIn("残すメモ", html)
+        self.assertNotIn("消すメモ", html)
+        self.assertIn('<span id="sources-count" hx-swap-oob="innerHTML">1</span>', html)
+        self.assertTrue(Source.objects.filter(pk=keep.pk).exists())
+
+    def test_unlink_related_returns_the_related_box(self):
+        self.study.related.add(self.slides)
+        data = {"relation": "related", "target": self.slides.pk}
+        html = self.client.post(reverse("task_unlink", args=[self.study.pk]), data, **self.HX).content.decode()
+        self.assertTrue(html.lstrip().startswith(f'<div id="related-{self.study.pk}"'))
+        self.assertIn("🔗 なし", html)
+        self.assertFalse(self.study.related.exists())

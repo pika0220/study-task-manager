@@ -1,0 +1,12 @@
+{% comment %}
+  ▶ を押したときに読みこむ、サブタスクの行の並び（views.task_children が返す・Issue #57）。
+  level：parent が何段目か。3段目（Task.MAX_DEPTH）の下にはサブタスクを足せないので「＋」を出さない。
+{% endcomment %}
+{% for child in parent.children.all %}
+  {% include "tasks/_child_row.html" with task=child level=level|add:1 %}
+{% endfor %}
+{% if level < 3 %}
+  <li>
+    <a href="{% url 'task_create_child' parent.pk %}{{ back_query }}" class="btn btn-ghost btn-sm min-h-11 px-1 text-primary">＋ サブタスク</a>
+  </li>
+{% endif %}
